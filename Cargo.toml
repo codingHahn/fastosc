@@ -1,0 +1,7 @@
+[package]
+name = "fastosc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rosc = "0.11.4"
