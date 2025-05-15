@@ -3,5 +3,13 @@ name = "fastosc"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "libhi"
+path = "src/lib.rs"
+
+[[bin]]
+name = "libhi-demo"
+path = "src/main.rs"
+
 [dependencies]
 rosc = "0.11.4"
