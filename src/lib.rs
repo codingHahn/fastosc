@@ -259,8 +259,8 @@ pub extern "C" fn fastosc_server_new(addr: *const c_char) -> *mut OscServer {
 #[unsafe(no_mangle)]
 pub extern "C" fn fastosc_server_free(server: *mut OscServer) {
     if !server.is_null() {
-        unsafe { drop(Box::from_raw(server)) }
-    }
+        let _ = unsafe { Box::from_raw(server).stop_thread() };
+    };
 }
 
 #[unsafe(no_mangle)]
