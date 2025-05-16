@@ -1,16 +1,9 @@
-use rosc::{OscError, OscMessage, OscPacket, OscType};
-use std::collections::HashMap;
+use rosc::OscMessage;
 use std::env;
-use std::ffi::{c_char, CStr, CString};
-use std::io::Error;
-use std::net::{SocketAddrV4, UdpSocket};
-use std::ptr::{self};
+use std::net::SocketAddrV4;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 
 use libhi::OscServer;
-
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -47,4 +40,3 @@ fn main() {
 
     let _ = server_handle.join();
 }
-
