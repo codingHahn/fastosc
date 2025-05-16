@@ -1,7 +1,7 @@
+use rosc::address::{Matcher, OscAddress};
 use rosc::{OscError, OscMessage, OscPacket, OscType};
 use std::collections::HashMap;
-use std::env;
-use std::ffi::{c_char, CStr, CString};
+use std::ffi::{CString, c_char};
 use std::io::Error;
 use std::net::{SocketAddrV4, UdpSocket};
 use std::ptr::{self};
@@ -20,7 +20,7 @@ pub enum FastOscError {
 
 pub struct OscServerInternal {
     sock: UdpSocket,
-    message_handlers: HashMap<String, Box<dyn Fn(&OscMessage) + Send>>,
+    message_handlers: HashMap<OscAddress, Box<dyn Fn(&OscMessage) + Send>>,
     error_handler: Option<Box<dyn Fn(&str) + Send>>,
     thread_handle: Option<JoinHandle<()>>,
 }
@@ -35,7 +35,11 @@ impl OscServerInternal {
         }
     }
 
-    fn register_handler(&mut self, path: &str, callback: impl Fn(&OscMessage) + 'static + Send) {
+    fn register_handler(
+        &mut self,
+        path: &OscAddress,
+        callback: impl Fn(&OscMessage) + 'static + Send,
+    ) {
         self.message_handlers
             .insert(path.to_owned(), Box::new(callback));
     }
@@ -63,14 +67,23 @@ impl OscServerInternal {
     fn handle_packet(&self, packet: OscPacket) -> Result<(), OscError> {
         match packet {
             OscPacket::Message(msg) => {
-                if let Some(callback) = self.message_handlers.get(&msg.addr) {
-                    (callback)(&msg);
-                    Ok(())
-                } else {
-                    println!("No handler for path: {0}", msg.addr);
-                    Err(OscError::Unimplemented)
+                if let Ok(address) = OscAddress::new(msg.addr.clone()) {
+                    if let Some(callback) = self.message_handlers.get(&address) {
+                        (callback)(&msg);
+                        return Ok(());
+                    }
+                } else if let Ok(matcher) = Matcher::new(&msg.addr) {
+                    for (addr, handler) in self.message_handlers.iter() {
+                        if matcher.match_address(addr) {
+                            (handler)(&msg);
+                        }
+                    }
+                    return Ok(());
                 }
+                println!("No handler for path: {0}", msg.addr);
+                Err(OscError::Unimplemented)
             }
+
             OscPacket::Bundle(bundle) => {
                 for item in bundle.content {
                     self.handle_packet(item)?;
@@ -99,11 +112,14 @@ impl OscServer {
         path: &str,
         callback: impl Fn(&OscMessage) + 'static + Send,
     ) -> Result<(), FastOscError> {
-        self.internal
-            .lock()
-            .map_err(|_| FastOscError::RegisterHandlerError)?
-            .register_handler(path, callback);
-        Ok(())
+        if let Ok(addr) = OscAddress::new(path.to_owned()) {
+            self.internal
+                .lock()
+                .map_err(|_| FastOscError::RegisterHandlerError)?
+                .register_handler(&addr, callback);
+            return Ok(());
+        }
+        Err(FastOscError::RegisterHandlerError)
     }
 
     pub fn register_error_handler(
@@ -122,7 +138,7 @@ impl OscServer {
             .lock()
             .map_err(|_| FastOscError::MutexFail)?
             .recv()
-            .map_err(|e| FastOscError::OscError(e))
+            .map_err(FastOscError::OscError)
     }
 
     pub fn handle_packet(&self, packet: OscPacket) -> Result<(), FastOscError> {
@@ -130,7 +146,7 @@ impl OscServer {
             .lock()
             .map_err(|_| FastOscError::RegisterHandlerError)?
             .handle_packet(packet)
-            .map_err(|e| FastOscError::OscError(e))
+            .map_err(FastOscError::OscError)
     }
 
     pub fn start_thread(&mut self) -> Result<(), FastOscError> {
@@ -231,9 +247,9 @@ pub extern "C" fn fastosc_register_handler(
     callback: extern "C" fn(*const c_char, *const c_char, *const OscType, i32),
 ) -> ApiResult {
     let wrapped_path = SendCharPtr(path);
-    if let Ok(safe_path) = unsafe { std::ffi::CStr::from_ptr(path).to_str() } {
+    if let Ok(safe_path) = { unsafe { std::ffi::CStr::from_ptr(path).to_str() } } {
         let callback_translator = move |osc_message: &OscMessage| {
-            let arg_count = osc_message.args.iter().count() as i32;
+            let arg_count = osc_message.args.len() as i32;
             let mut type_str = vec![','];
             for t in &osc_message.args {
                 type_str.push(osc_type_to_char(t.clone()));
@@ -249,7 +265,10 @@ pub extern "C" fn fastosc_register_handler(
         unsafe {
             match server.as_mut() {
                 Some(server) => {
-                    if let Ok(_) = server.register_handler(safe_path, callback_translator) {
+                    if server
+                        .register_handler(&safe_path, callback_translator)
+                        .is_ok()
+                    {
                         return ApiResult::Success;
                     } else {
                         return ApiResult::MutexFailError;
@@ -259,7 +278,7 @@ pub extern "C" fn fastosc_register_handler(
             }
         }
     }
-    return ApiResult::GenericError;
+    ApiResult::GenericError
 }
 
 #[unsafe(no_mangle)]
@@ -267,7 +286,7 @@ pub extern "C" fn fastosc_start_thread(server: *mut OscServer) -> ApiResult {
     unsafe {
         match server.as_mut() {
             Some(server) => {
-                if let Err(_) = server.start_thread() {
+                if server.start_thread().is_err() {
                     return ApiResult::MutexFailError;
                 }
                 ApiResult::Success
@@ -282,23 +301,21 @@ pub extern "C" fn fastosc_register_error_handler(
     server: *mut OscServer,
     callback: extern "C" fn(*const c_char),
 ) -> ApiResult {
-        let callback_translator = move |err_str: &str| {
-            if let Ok(c_str) = CString::new(err_str) {
-                (callback)(
-                    c_str.as_ptr(),
-                )
-            }
-        };
-        unsafe {
-            match server.as_mut() {
-                Some(server) => {
-                    if let Ok(_) = server.register_error_handler(callback_translator) {
-                        return ApiResult::Success;
-                    } else {
-                        return ApiResult::MutexFailError;
-                    }
+    let callback_translator = move |err_str: &str| {
+        if let Ok(c_str) = CString::new(err_str) {
+            (callback)(c_str.as_ptr())
+        }
+    };
+    unsafe {
+        match server.as_mut() {
+            Some(server) => {
+                if server.register_error_handler(callback_translator).is_ok() {
+                    ApiResult::Success
+                } else {
+                    ApiResult::MutexFailError
                 }
-                None => return ApiResult::NullHandleError,
             }
+            None => ApiResult::NullHandleError,
         }
     }
+}
