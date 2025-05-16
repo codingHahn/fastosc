@@ -16,6 +16,7 @@ pub enum FastOscError {
     OscError(OscError),
     MutexFail,
     RegisterHandlerError,
+    ThreadPanic,
 }
 
 pub struct OscServerInternal {
@@ -23,6 +24,7 @@ pub struct OscServerInternal {
     message_handlers: HashMap<OscAddress, Box<dyn Fn(&OscMessage) + Send>>,
     error_handler: Option<Box<dyn Fn(&str) + Send>>,
     thread_handle: Option<JoinHandle<()>>,
+    stop: bool,
 }
 
 impl OscServerInternal {
@@ -32,6 +34,7 @@ impl OscServerInternal {
             message_handlers: HashMap::new(),
             error_handler: None,
             thread_handle: None,
+            stop: false,
         }
     }
 
@@ -155,6 +158,9 @@ impl OscServer {
             loop {
                 if let Err(err) = serv.recv() {
                     if let Ok(lock) = serv.internal.lock() {
+                        if lock.stop {
+                            break;
+                        }
                         match &lock.error_handler {
                             Some(handler) => {
                                 let error_str = format!("FastOscError: {err:#?}");
@@ -170,6 +176,23 @@ impl OscServer {
             .lock()
             .map_err(|_| FastOscError::MutexFail)?
             .thread_handle = Some(server_handle);
+        Ok(())
+    }
+
+    pub fn stop_thread(&mut self) -> Result<(), FastOscError> {
+        let mut lock = self
+            .internal
+            .lock()
+            .map_err(|_| FastOscError::RegisterHandlerError)?;
+
+        lock.stop = true;
+        if let Some(th) = lock.thread_handle.take() {
+            th.join().map_err(|_| FastOscError::ThreadPanic)?;
+        };
+
+        // Reset the stop condition variable to allow starting the thread again
+        lock.stop = false;
+
         Ok(())
     }
 }
@@ -314,6 +337,20 @@ pub extern "C" fn fastosc_register_error_handler(
                 } else {
                     ApiResult::MutexFailError
                 }
+            }
+            None => ApiResult::NullHandleError,
+        }
+    }
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn fastosc_stop_thread(server: *mut OscServer) -> ApiResult {
+    unsafe {
+        match server.as_mut() {
+            Some(server) => {
+                if server.stop_thread().is_err() {
+                    return ApiResult::MutexFailError;
+                }
+                ApiResult::Success
             }
             None => ApiResult::NullHandleError,
         }
