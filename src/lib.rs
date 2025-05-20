@@ -3,7 +3,7 @@ use rosc::{OscError, OscMessage, OscPacket, OscType};
 use std::collections::HashMap;
 use std::ffi::{CString, c_char};
 use std::io::Error;
-use std::net::{SocketAddrV4, UdpSocket};
+use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
 use std::ptr::{self};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -19,9 +19,15 @@ pub enum FastOscError {
     ThreadPanic,
 }
 
-pub struct OscServerInternal {
+/// Maps an `OScAddress` to a closure which has to be sent,
+/// because it is called in another thread
+type AddressToCallbackMap = HashMap<OscAddress, Box<dyn Fn(&OscMessage, &SocketAddr) + Send>>;
+
+/// Internal, non threadsafe OscServer. It gets wrapped in `Arc` and `Mutex` in
+/// `OscServer`
+struct OscServerInternal {
     sock: UdpSocket,
-    message_handlers: HashMap<OscAddress, Box<dyn Fn(&OscMessage) + Send>>,
+    message_handlers: AddressToCallbackMap,
     error_handler: Option<Box<dyn Fn(&str) + Send>>,
     thread_handle: Option<JoinHandle<()>>,
     stop: bool,
@@ -41,7 +47,7 @@ impl OscServerInternal {
     fn register_handler(
         &mut self,
         path: &OscAddress,
-        callback: impl Fn(&OscMessage) + 'static + Send,
+        callback: impl Fn(&OscMessage, &SocketAddr) + 'static + Send,
     ) {
         self.message_handlers
             .insert(path.to_owned(), Box::new(callback));
@@ -57,7 +63,7 @@ impl OscServerInternal {
             Ok((size, addr)) => {
                 println!("Received packet with size {} from: {}", size, addr);
                 let (_, packet) = rosc::decoder::decode_udp(&buf[..size])?;
-                self.handle_packet(packet)?;
+                self.handle_packet(packet, addr)?;
                 Ok(())
             }
             Err(e) => {
@@ -67,18 +73,18 @@ impl OscServerInternal {
         }
     }
 
-    fn handle_packet(&self, packet: OscPacket) -> Result<(), OscError> {
+    fn handle_packet(&self, packet: OscPacket, from_addr: SocketAddr) -> Result<(), OscError> {
         match packet {
             OscPacket::Message(msg) => {
                 if let Ok(address) = OscAddress::new(msg.addr.clone()) {
                     if let Some(callback) = self.message_handlers.get(&address) {
-                        (callback)(&msg);
+                        (callback)(&msg, &from_addr);
                         return Ok(());
                     }
                 } else if let Ok(matcher) = Matcher::new(&msg.addr) {
                     for (addr, handler) in self.message_handlers.iter() {
                         if matcher.match_address(addr) {
-                            (handler)(&msg);
+                            (handler)(&msg, &from_addr);
                         }
                     }
                     return Ok(());
@@ -89,11 +95,19 @@ impl OscServerInternal {
 
             OscPacket::Bundle(bundle) => {
                 for item in bundle.content {
-                    self.handle_packet(item)?;
+                    self.handle_packet(item, from_addr)?;
                 }
                 Ok(())
             }
         }
+    }
+
+    pub fn send_packet(&self, packet: OscPacket, to_addr: SocketAddr) -> Result<(), FastOscError> {
+        let buf = rosc::encoder::encode(&packet).map_err(|e| FastOscError::OscError(e))?;
+        self.sock
+            .send_to(&buf, to_addr)
+            .map_err(|e| FastOscError::SendError(e))?;
+        Ok(())
     }
 }
 
@@ -113,7 +127,7 @@ impl OscServer {
     pub fn register_handler(
         &self,
         path: &str,
-        callback: impl Fn(&OscMessage) + 'static + Send,
+        callback: impl Fn(&OscMessage, &SocketAddr) + 'static + Send,
     ) -> Result<(), FastOscError> {
         if let Ok(addr) = OscAddress::new(path.to_owned()) {
             self.internal
@@ -144,12 +158,22 @@ impl OscServer {
             .map_err(FastOscError::OscError)
     }
 
-    pub fn handle_packet(&self, packet: OscPacket) -> Result<(), FastOscError> {
+    pub fn handle_packet(
+        &self,
+        packet: OscPacket,
+        from_addr: SocketAddr,
+    ) -> Result<(), FastOscError> {
         self.internal
             .lock()
             .map_err(|_| FastOscError::RegisterHandlerError)?
-            .handle_packet(packet)
+            .handle_packet(packet, from_addr)
             .map_err(FastOscError::OscError)
+    }
+
+    pub fn send_packet(&self, packet: OscPacket, to_addr: SocketAddr) -> Result<(), FastOscError> {
+        let lock = self.internal.lock().map_err(|_| FastOscError::MutexFail)?;
+
+        lock.send_packet(packet, to_addr)
     }
 
     pub fn start_thread(&mut self) -> Result<(), FastOscError> {
@@ -236,7 +260,8 @@ pub enum ApiResult {
     Success = 0,
     GenericError = -1,
     NullHandleError = -2,
-    MutexFailError = -3,
+    InvalidArgument = -3,
+    MutexFailError = -4,
 }
 
 #[unsafe(no_mangle)]
@@ -257,21 +282,21 @@ pub extern "C" fn fastosc_server_new(addr: *const c_char) -> *mut OscServer {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn fastosc_server_free(server: *mut OscServer) {
+pub unsafe extern "C" fn fastosc_server_free(server: *mut OscServer) {
     if !server.is_null() {
         let _ = unsafe { Box::from_raw(server).stop_thread() };
     };
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn fastosc_register_handler(
+pub unsafe extern "C" fn fastosc_register_handler(
     server: *mut OscServer,
     path: *const c_char,
-    callback: extern "C" fn(*const c_char, *const c_char, *const OscType, i32),
+    callback: extern "C" fn(*const c_char, *const c_char, *const SocketAddr, *const OscType, i32),
 ) -> ApiResult {
     let wrapped_path = SendCharPtr(path);
     if let Ok(safe_path) = { unsafe { std::ffi::CStr::from_ptr(path).to_str() } } {
-        let callback_translator = move |osc_message: &OscMessage| {
+        let callback_translator = move |osc_message: &OscMessage, from_addr: &SocketAddr| {
             let arg_count = osc_message.args.len() as i32;
             let mut type_str = vec![','];
             for t in &osc_message.args {
@@ -281,6 +306,7 @@ pub extern "C" fn fastosc_register_handler(
             (callback)(
                 wrapped_path.get_ptr(),
                 type_str_c.get_ptr(),
+                from_addr as *const SocketAddr,
                 osc_message.args.as_ptr(),
                 arg_count,
             );
@@ -289,7 +315,7 @@ pub extern "C" fn fastosc_register_handler(
             match server.as_mut() {
                 Some(server) => {
                     if server
-                        .register_handler(&safe_path, callback_translator)
+                        .register_handler(safe_path, callback_translator)
                         .is_ok()
                     {
                         return ApiResult::Success;
@@ -301,11 +327,11 @@ pub extern "C" fn fastosc_register_handler(
             }
         }
     }
-    ApiResult::GenericError
+    ApiResult::InvalidArgument
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn fastosc_start_thread(server: *mut OscServer) -> ApiResult {
+pub unsafe extern "C" fn fastosc_start_thread(server: *mut OscServer) -> ApiResult {
     unsafe {
         match server.as_mut() {
             Some(server) => {
@@ -320,7 +346,7 @@ pub extern "C" fn fastosc_start_thread(server: *mut OscServer) -> ApiResult {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn fastosc_register_error_handler(
+pub unsafe extern "C" fn fastosc_register_error_handler(
     server: *mut OscServer,
     callback: extern "C" fn(*const c_char),
 ) -> ApiResult {
@@ -343,7 +369,7 @@ pub extern "C" fn fastosc_register_error_handler(
     }
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn fastosc_stop_thread(server: *mut OscServer) -> ApiResult {
+pub unsafe extern "C" fn fastosc_stop_thread(server: *mut OscServer) -> ApiResult {
     unsafe {
         match server.as_mut() {
             Some(server) => {

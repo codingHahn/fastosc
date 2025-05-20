@@ -1,7 +1,8 @@
 use rosc::OscMessage;
 use std::env;
-use std::net::SocketAddrV4;
+use std::net::{SocketAddr, SocketAddrV4};
 use std::str::FromStr;
+use std::time::Duration;
 
 use libhi::OscServer;
 
@@ -23,20 +24,28 @@ fn main() {
     server
         .register_handler(
             "/test",
-            Box::new(|msg: &OscMessage| println!("Hi, {0}, {1:#?}", msg.addr, msg.args)),
+            Box::new(|msg: &OscMessage, _from_addr: &SocketAddr| {
+                println!("Hi, {0}, {1:#?}", msg.addr, msg.args)
+            }),
         )
         .unwrap();
     server
         .register_handler(
             "/test2",
-            Box::new(|msg: &OscMessage| println!("Hi, {0}, {1:#?}", msg.addr, msg.args)),
+            Box::new(|msg: &OscMessage, _from_addr: &SocketAddr| {
+                println!("Hi, {0}, {1:#?}", msg.addr, msg.args)
+            }),
         )
         .unwrap();
     server
         .register_handler(
             "/test5",
-            Box::new(|msg: &OscMessage| println!("Hi, {0}, {1:#?}", msg.addr, msg.args)),
+            Box::new(|msg: &OscMessage, _from_addr: &SocketAddr| {
+                println!("Hi, {0}, {1:#?}", msg.addr, msg.args)
+            }),
         )
         .unwrap();
-    loop {}
+    loop {
+        std::thread::sleep(Duration::from_secs(1))
+    }
 }
