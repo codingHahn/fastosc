@@ -1,6 +1,6 @@
 use rosc::{OscMessage, OscType};
 use std::any::Any;
-use std::ffi::{CString, c_char, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::net::{SocketAddr, SocketAddrV4};
 use std::ptr::{self};
 use std::str::FromStr;
@@ -48,7 +48,7 @@ pub extern "C" fn fastosc_server_new(addr: *const c_char) -> *mut OscServer {
     if addr.is_null() {
         return ptr::null_mut();
     }
-    let cstring = unsafe { CString::from_raw(addr.cast_mut()) };
+    let cstring = unsafe { CStr::from_ptr(addr.cast_mut()) };
     let safe_addr = cstring.to_str().unwrap_or("").to_owned();
 
     if let Ok(working_addr) = SocketAddrV4::from_str(&safe_addr) {
