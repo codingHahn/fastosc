@@ -1,0 +1,15 @@
+[package]
+name = "libhi-ffi"
+workspace = ".."
+edition = "2024"
+
+[lib]
+name = "libhiffi"
+path = "src/capi.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+libhi = { path = ".." }
+
+[build-dependencies]
+cbindgen = "0.28.0"

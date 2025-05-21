@@ -291,15 +291,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fastosc"
-version = "0.1.0"
-dependencies = [
- "cbindgen",
- "criterion",
- "rosc",
-]
-
-[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -396,6 +387,22 @@ name = "libc"
 version = "0.2.172"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d750af042f7ef4f724306de029d18836c26c1765a54a6a3f094cbd23a7267ffa"
+
+[[package]]
+name = "libhi"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "rosc",
+]
+
+[[package]]
+name = "libhi-ffi"
+version = "0.0.0"
+dependencies = [
+ "cbindgen",
+ "libhi",
+]
 
 [[package]]
 name = "linux-raw-sys"

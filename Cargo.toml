@@ -1,11 +1,15 @@
 [package]
-name = "fastosc"
+name = "libhi"
 version = "0.1.0"
 edition = "2024"
+
+[workspace]
+members = [ "libhi-ffi" ]
 
 [lib]
 name = "libhi"
 path = "src/lib.rs"
+
 
 [[bin]]
 name = "libhi-demo"
@@ -20,6 +24,3 @@ criterion = "0.3"
 [[bench]]
 name = "osc_bench"
 harness = false
-
-[build-dependencies]
-cbindgen = "0.28.0"
