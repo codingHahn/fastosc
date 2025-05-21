@@ -24,25 +24,34 @@ fn main() {
     server
         .register_handler(
             "/test",
-            Box::new(|msg: &OscMessage, _from_addr: &SocketAddr| {
-                println!("Hi, {0}, {1:#?}", msg.addr, msg.args)
-            }),
+            Box::new(
+                |msg: &OscMessage, _from_addr: &SocketAddr, _user_data: Option<_>| {
+                    println!("Hi, {0}, {1:#?}", msg.addr, msg.args)
+                },
+            ),
+            None,
         )
         .unwrap();
     server
         .register_handler(
             "/test2",
-            Box::new(|msg: &OscMessage, _from_addr: &SocketAddr| {
-                println!("Hi, {0}, {1:#?}", msg.addr, msg.args)
-            }),
+            Box::new(
+                |msg: &OscMessage, _from_addr: &SocketAddr, _user_data: Option<_>| {
+                    println!("Hi, {0}, {1:#?}", msg.addr, msg.args)
+                },
+            ),
+            None,
         )
         .unwrap();
     server
         .register_handler(
             "/test5",
-            Box::new(|msg: &OscMessage, _from_addr: &SocketAddr| {
-                println!("Hi, {0}, {1:#?}", msg.addr, msg.args)
-            }),
+            Box::new(
+                |msg: &OscMessage, _from_addr: &SocketAddr, _user_data: Option<_>| {
+                    println!("Hi, {0}, {1:#?}", msg.addr, msg.args)
+                },
+            ),
+            None,
         )
         .unwrap();
     loop {

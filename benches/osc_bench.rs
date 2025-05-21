@@ -31,9 +31,12 @@ fn bench_handler_dispatch(c: &mut Criterion) {
             server
                 .register_handler(
                     &line,
-                    Box::new(|msg: &OscMessage, _from_addr: &SocketAddr| {
-                        std::hint::black_box(msg);
-                    }),
+                    Box::new(
+                        |msg: &OscMessage, _from_addr: &SocketAddr, _user_data: Option<_>| {
+                            std::hint::black_box(msg);
+                        },
+                    ),
+                    None,
                 )
                 .unwrap();
             count += 1;
@@ -76,9 +79,12 @@ fn bench_handler_dispatch_wildcard(c: &mut Criterion) {
             server
                 .register_handler(
                     &line,
-                    Box::new(|msg: &OscMessage, _from_addr: &SocketAddr| {
-                        std::hint::black_box(msg);
-                    }),
+                    Box::new(
+                        |msg: &OscMessage, _from_addr: &SocketAddr, _user_data: Option<_>| {
+                            std::hint::black_box(msg);
+                        },
+                    ),
+                    None,
                 )
                 .unwrap();
             count += 1;

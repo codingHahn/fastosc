@@ -1,7 +1,8 @@
 use rosc::address::{Matcher, OscAddress};
 use rosc::{OscError, OscMessage, OscPacket, OscType};
+use std::any::Any;
 use std::collections::HashMap;
-use std::ffi::{CString, c_char};
+use std::ffi::{CString, c_char, c_void};
 use std::io::Error;
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
 use std::ptr::{self};
@@ -21,8 +22,14 @@ pub enum FastOscError {
 
 /// Maps an `OScAddress` to a closure which has to be sent,
 /// because it is called in another thread
-type AddressToCallbackMap = HashMap<OscAddress, Box<dyn Fn(&OscMessage, &SocketAddr) + Send>>;
+type AddressToCallbackMap = HashMap<OscAddress, CallbackWithUserdata>;
 
+struct CallbackWithUserdata {
+    callback: Box<
+        dyn Fn(&OscMessage, &SocketAddr, Option<Arc<Mutex<Box<dyn Any + Send>>>>) + Send + 'static,
+    >,
+    user_data: Option<Arc<Mutex<Box<dyn Any + Send>>>>,
+}
 /// Internal, non threadsafe OscServer. It gets wrapped in `Arc` and `Mutex` in
 /// `OscServer`
 struct OscServerInternal {
@@ -47,10 +54,16 @@ impl OscServerInternal {
     fn register_handler(
         &mut self,
         path: &OscAddress,
-        callback: impl Fn(&OscMessage, &SocketAddr) + 'static + Send,
+        callback: impl Fn(&OscMessage, &SocketAddr, Option<Arc<Mutex<Box<dyn Any + Send>>>>)
+        + 'static
+        + Send,
+        user_data: Option<Arc<Mutex<Box<dyn Any + Send>>>>,
     ) {
-        self.message_handlers
-            .insert(path.to_owned(), Box::new(callback));
+        let callback_data = CallbackWithUserdata {
+            callback: Box::new(callback),
+            user_data,
+        };
+        self.message_handlers.insert(path.to_owned(), callback_data);
     }
 
     fn register_error_handler(&mut self, callback: impl Fn(&str) + 'static + Send) {
@@ -77,14 +90,18 @@ impl OscServerInternal {
         match packet {
             OscPacket::Message(msg) => {
                 if let Ok(address) = OscAddress::new(msg.addr.clone()) {
-                    if let Some(callback) = self.message_handlers.get(&address) {
-                        (callback)(&msg, &from_addr);
+                    if let Some(callback_with_userdata) = self.message_handlers.get(&address) {
+                        (callback_with_userdata.callback)(
+                            &msg,
+                            &from_addr,
+                            callback_with_userdata.user_data.clone(),
+                        );
                         return Ok(());
                     }
                 } else if let Ok(matcher) = Matcher::new(&msg.addr) {
                     for (addr, handler) in self.message_handlers.iter() {
                         if matcher.match_address(addr) {
-                            (handler)(&msg, &from_addr);
+                            (handler.callback)(&msg, &from_addr, handler.user_data.clone());
                         }
                     }
                     return Ok(());
@@ -127,13 +144,16 @@ impl OscServer {
     pub fn register_handler(
         &self,
         path: &str,
-        callback: impl Fn(&OscMessage, &SocketAddr) + 'static + Send,
+        callback: impl Fn(&OscMessage, &SocketAddr, Option<Arc<Mutex<Box<dyn Any + Send>>>>)
+        + 'static
+        + Send,
+        user_data: Option<Arc<Mutex<Box<dyn Any + Send>>>>,
     ) -> Result<(), FastOscError> {
         if let Ok(addr) = OscAddress::new(path.to_owned()) {
             self.internal
                 .lock()
                 .map_err(|_| FastOscError::RegisterHandlerError)?
-                .register_handler(&addr, callback);
+                .register_handler(&addr, callback, user_data);
             return Ok(());
         }
         Err(FastOscError::RegisterHandlerError)
@@ -255,6 +275,20 @@ impl SendCharPtr {
 }
 unsafe impl Send for SendCharPtr {}
 
+struct SendVoidPtr(*const c_void);
+impl SendVoidPtr {
+    pub fn get_ptr(&self) -> *const c_void {
+        self.0
+    }
+}
+unsafe impl Send for SendVoidPtr {}
+impl Copy for SendVoidPtr {}
+impl Clone for SendVoidPtr {
+    fn clone(&self) -> Self {
+        SendVoidPtr(self.0)
+    }
+}
+
 #[repr(C)]
 pub enum ApiResult {
     Success = 0,
@@ -292,30 +326,53 @@ pub unsafe extern "C" fn fastosc_server_free(server: *mut OscServer) {
 pub unsafe extern "C" fn fastosc_register_handler(
     server: *mut OscServer,
     path: *const c_char,
-    callback: extern "C" fn(*const c_char, *const c_char, *const SocketAddr, *const OscType, i32),
+    callback: extern "C" fn(
+        *const c_char,
+        *const c_char,
+        *const SocketAddr,
+        *const OscType,
+        i32,
+        *const c_void,
+    ),
+    user_data_from_c: *const c_void,
 ) -> ApiResult {
     let wrapped_path = SendCharPtr(path);
     if let Ok(safe_path) = { unsafe { std::ffi::CStr::from_ptr(path).to_str() } } {
-        let callback_translator = move |osc_message: &OscMessage, from_addr: &SocketAddr| {
-            let arg_count = osc_message.args.len() as i32;
-            let mut type_str = vec![','];
-            for t in &osc_message.args {
-                type_str.push(osc_type_to_char(t.clone()));
-            }
-            let type_str_c = SendCharPtr(type_str.iter().collect::<String>().as_ptr() as *const i8);
-            (callback)(
-                wrapped_path.get_ptr(),
-                type_str_c.get_ptr(),
-                from_addr as *const SocketAddr,
-                osc_message.args.as_ptr(),
-                arg_count,
-            );
-        };
+        let callback_translator =
+            move |osc_message: &OscMessage,
+                  from_addr: &SocketAddr,
+                  user_data: Option<Arc<Mutex<Box<dyn Any + Send>>>>| {
+                let arg_count = osc_message.args.len() as i32;
+                let mut type_str = vec![','];
+                for t in &osc_message.args {
+                    type_str.push(osc_type_to_char(t.clone()));
+                }
+                let type_str_c =
+                    SendCharPtr(type_str.iter().collect::<String>().as_ptr() as *const i8);
+                let user_data_c: SendVoidPtr = match user_data.clone() {
+                    Some(data) => *data.lock().unwrap().downcast_ref::<SendVoidPtr>().unwrap(),
+                    None => SendVoidPtr(ptr::null()),
+                };
+                (callback)(
+                    wrapped_path.get_ptr(),
+                    type_str_c.get_ptr(),
+                    from_addr as *const SocketAddr,
+                    osc_message.args.as_ptr(),
+                    arg_count,
+                    user_data_c.get_ptr(),
+                );
+            };
         unsafe {
             match server.as_mut() {
                 Some(server) => {
+                    let user_data = match user_data_from_c.as_ref() {
+                        Some(user_data) => Some(Arc::new(Mutex::new(
+                            Box::new(SendVoidPtr(user_data)) as Box<dyn std::any::Any + Send>,
+                        ))),
+                        None => None,
+                    };
                     if server
-                        .register_handler(safe_path, callback_translator)
+                        .register_handler(safe_path, callback_translator, user_data)
                         .is_ok()
                     {
                         return ApiResult::Success;
