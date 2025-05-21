@@ -14,5 +14,12 @@ path = "src/main.rs"
 [dependencies]
 rosc = { path = "../rosc" }
 
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "osc_bench"
+harness = false
+
 [build-dependencies]
 cbindgen = "0.28.0"
