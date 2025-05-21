@@ -92,8 +92,8 @@ pub unsafe extern "C" fn fastosc_register_handler(
                 for t in &osc_message.args {
                     type_str.push(osc_type_to_char(t.clone()));
                 }
-                let type_str_c =
-                    SendCharPtr(type_str.iter().collect::<String>().as_ptr() as *const i8);
+                let cs = CString::new(type_str.iter().collect::<String>()).unwrap();
+                let type_str_c = SendCharPtr(cs.as_ptr() as *const i8);
                 let user_data_c: SendVoidPtr = match user_data.clone() {
                     Some(data) => *data.lock().unwrap().downcast_ref::<SendVoidPtr>().unwrap(),
                     None => SendVoidPtr(ptr::null()),
