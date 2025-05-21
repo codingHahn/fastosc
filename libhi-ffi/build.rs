@@ -17,7 +17,7 @@ fn main() {
                 e => panic!("{:?}", e),
             },
             |bindings| {
-                bindings.write_to_file("target/include/fastosc.h");
+                bindings.write_to_file("../target/include/fastosc.h");
             },
         );
 }

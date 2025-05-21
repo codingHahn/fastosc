@@ -119,10 +119,10 @@ impl OscServerInternal {
     }
 
     pub fn send_packet(&self, packet: OscPacket, to_addr: SocketAddr) -> Result<(), FastOscError> {
-        let buf = rosc::encoder::encode(&packet).map_err(|e| FastOscError::OscError(e))?;
+        let buf = rosc::encoder::encode(&packet).map_err(FastOscError::OscError)?;
         self.sock
             .send_to(&buf, to_addr)
-            .map_err(|e| FastOscError::SendError(e))?;
+            .map_err(FastOscError::SendError)?;
         Ok(())
     }
 }

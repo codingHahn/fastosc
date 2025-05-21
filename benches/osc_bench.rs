@@ -5,7 +5,7 @@ use criterion::{criterion_group, criterion_main};
 use libhi::OscServer;
 use rosc::{OscMessage, OscPacket, OscType};
 use std::fs::File;
-use std::io::{self, BufReader, prelude::*};
+use std::io::{BufReader, prelude::*};
 use std::net::{SocketAddr, SocketAddrV4};
 use std::str::FromStr;
 
@@ -22,8 +22,7 @@ fn bench_handler_dispatch(c: &mut Criterion) {
         let reader = BufReader::new(file);
         let server = OscServer::new_from_ip(addr).expect("Error creating OscServer");
 
-        let mut count = 0;
-        for line in reader.lines() {
+        for (count, line) in reader.lines().enumerate() {
             if count > *size {
                 break;
             }
@@ -39,14 +38,11 @@ fn bench_handler_dispatch(c: &mut Criterion) {
                     None,
                 )
                 .unwrap();
-            count += 1;
         }
-        let packet = OscPacket::Message {
-            0: OscMessage {
+        let packet = OscPacket::Message(OscMessage {
                 addr: "/dbaudio1/fixed/hardwarevariant".to_string(),
                 args: vec![OscType::Int(1)],
-            },
-        };
+            });
         group.throughput(Throughput::Elements(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &_size| {
             b.iter(|| server.handle_packet(packet.clone(), SocketAddr::V4(addr)));
@@ -70,8 +66,7 @@ fn bench_handler_dispatch_wildcard(c: &mut Criterion) {
         let reader = BufReader::new(file);
         let server = OscServer::new_from_ip(addr).expect("Error creating OscServer");
 
-        let mut count = 0;
-        for line in reader.lines() {
+        for (count, line) in reader.lines().enumerate() {
             if count > *size {
                 break;
             }
@@ -87,14 +82,11 @@ fn bench_handler_dispatch_wildcard(c: &mut Criterion) {
                     None,
                 )
                 .unwrap();
-            count += 1;
         }
-        let packet = OscPacket::Message {
-            0: OscMessage {
+        let packet = OscPacket::Message(OscMessage {
                 addr: "/dbaudio1/matrixnode/enable/1/*".to_string(),
                 args: vec![OscType::Int(1)],
-            },
-        };
+            });
         group.throughput(Throughput::Elements(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &_size| {
             b.iter(|| server.handle_packet(packet.clone(), SocketAddr::V4(addr)));

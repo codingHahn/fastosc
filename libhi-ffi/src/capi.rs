@@ -110,12 +110,9 @@ pub unsafe extern "C" fn fastosc_register_handler(
         unsafe {
             match server.as_mut() {
                 Some(server) => {
-                    let user_data = match user_data_from_c.as_ref() {
-                        Some(user_data) => Some(Arc::new(Mutex::new(
+                    let user_data = user_data_from_c.as_ref().map(|user_data| Arc::new(Mutex::new(
                             Box::new(SendVoidPtr(user_data)) as Box<dyn std::any::Any + Send>,
-                        ))),
-                        None => None,
-                    };
+                        )));
                     if server
                         .register_handler(safe_path, callback_translator, user_data)
                         .is_ok()
