@@ -10,6 +10,8 @@ fn main() {
     cbindgen::Builder::new()
         .with_config(Config::from_file("cbindgen.toml").unwrap())
         .with_crate(crate_dir)
+        .with_parse_deps(true)
+        .with_parse_include(&["libhi", "rosc"])
         .generate()
         .map_or_else(
             |error| match error {
@@ -17,7 +19,7 @@ fn main() {
                 e => panic!("{:?}", e),
             },
             |bindings| {
-                bindings.write_to_file("../target/include/fastosc.h");
+                bindings.write_to_file("../target/include/libhi.h");
             },
         );
 }

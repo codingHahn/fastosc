@@ -127,7 +127,6 @@ impl OscServerInternal {
     }
 }
 
-#[repr(C)]
 #[derive(Clone)]
 pub struct OscServer {
     internal: Arc<Mutex<OscServerInternal>>,

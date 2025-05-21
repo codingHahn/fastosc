@@ -6,7 +6,7 @@ use std::ptr::{self};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
-use libhi::*;
+pub use libhi::*;
 
 /// All pointers in rust are !Send. But we need to send an *const c_char over a thread
 /// bondary (because callbacks are handled in a seperate thread).
