@@ -40,9 +40,9 @@ fn bench_handler_dispatch(c: &mut Criterion) {
                 .unwrap();
         }
         let packet = OscPacket::Message(OscMessage {
-                addr: "/dbaudio1/fixed/hardwarevariant".to_string(),
-                args: vec![OscType::Int(1)],
-            });
+            addr: "/dbaudio1/fixed/hardwarevariant".to_string(),
+            args: vec![OscType::Int(1)],
+        });
         group.throughput(Throughput::Elements(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &_size| {
             b.iter(|| server.handle_packet(packet.clone(), SocketAddr::V4(addr)));
@@ -84,9 +84,9 @@ fn bench_handler_dispatch_wildcard(c: &mut Criterion) {
                 .unwrap();
         }
         let packet = OscPacket::Message(OscMessage {
-                addr: "/dbaudio1/matrixnode/enable/1/*".to_string(),
-                args: vec![OscType::Int(1)],
-            });
+            addr: "/dbaudio1/matrixnode/enable/1/*".to_string(),
+            args: vec![OscType::Int(1)],
+        });
         group.throughput(Throughput::Elements(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &_size| {
             b.iter(|| server.handle_packet(packet.clone(), SocketAddr::V4(addr)));
