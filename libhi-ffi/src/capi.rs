@@ -225,3 +225,54 @@ pub unsafe extern "C" fn fastosc_stop_thread(server: *mut OscServer) -> ApiResul
         }
     }
 }
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fastosc_get_ip_of_socket_addr(
+    sock_addr: *const SocketAddr,
+) -> *const char {
+    unsafe {
+        match sock_addr.as_ref() {
+            Some(sock_addr) => {
+                CString::into_raw(CString::new(sock_addr.ip().to_string()).unwrap()) as *const char
+            }
+            None => ptr::null(),
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fastosc_free_ip_of_socket_addr(addr_part: *mut char) {
+    unsafe {
+        if addr_part.is_null() {
+            return ();
+        }
+        // Reconstruct a CString from the pointer and drop it
+        let _ = CString::from_raw(addr_part as *mut i8);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fastosc_get_port_of_socket_addr(sock_addr: *const SocketAddr) -> u16 {
+    unsafe {
+        match sock_addr.as_ref() {
+            Some(sock_addr) => sock_addr.port(),
+            None => 0,
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fastosc_set_port_of_socket_addr(
+    sock_addr: *mut SocketAddr,
+    port: u16,
+) -> ApiResult {
+    unsafe {
+        match sock_addr.as_mut() {
+            Some(sock_addr) => {
+                sock_addr.set_port(port);
+                ApiResult::Success
+            }
+            None => ApiResult::NullHandleError,
+        }
+    }
+}
