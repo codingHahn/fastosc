@@ -1,3 +1,4 @@
+//! This crate is inspired by the C API from liblo.
 use rosc::{OscMessage, OscType};
 use std::any::Any;
 use std::ffi::{CStr, CString, c_char, c_void};
@@ -43,6 +44,13 @@ pub enum ApiResult {
     MutexFailError = -4,
 }
 
+/// Constructs and returns an [`OscServer`] that is configured to listen on the given IPv4 address
+/// and port combination in the following style: IPv4:Port, for example `127.0.0.1:50014`.
+///
+/// Returns a nullptr if the address is invalid or already in use.
+///
+/// To start the server thread (and actually recieve messages, call [`fastosc_start_thread`].
+/// To free the server, call [`fastosc_server_free`].
 #[unsafe(no_mangle)]
 pub extern "C" fn fastosc_server_new(addr: *const c_char) -> *mut OscServer {
     if addr.is_null() {
@@ -60,6 +68,7 @@ pub extern "C" fn fastosc_server_new(addr: *const c_char) -> *mut OscServer {
     }
 }
 
+/// Frees a server created by [`fastosc_server_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fastosc_server_free(server: *mut OscServer) {
     if !server.is_null() {
@@ -67,6 +76,33 @@ pub unsafe extern "C" fn fastosc_server_free(server: *mut OscServer) {
     };
 }
 
+/// Register a handler that responds to the address specified in the argument `path`.
+///
+/// `user_data_from_c` can either be `NULL` or an arbitrary pointer to some data that
+/// gets passed to the callback as last argument.
+///
+/// # Callback
+///
+/// The callback is the most advanced argument in this list. It gets the following arguments passed
+/// in that order:
+///
+/// - osc_address as `const char*`: The address the handler got called for
+/// - osc_types as `const char*`: A string of the recieved arguments in the OSC message, starting
+///   with `,`
+/// - socket_addr as `const SocketAddr*`: A struct holding source IP and port of the osc message
+/// - osc_arguments as `const OscType**`: A list of arguments in the message with length `len`
+/// - len as `int_32`: Length of the osc_arguments list
+/// - user_data as `void *`: `user_data_from_c` will be passed to this
+///
+/// # Safety
+///
+/// The function pointer `callback` is called from another thread (started by
+/// [`fastosc_start_thread`], so make sure that everything you do in the callback is
+/// thread-safe.
+/// Also make sure that the data in `user_data_from_c` is accessed in a thread-safe way
+/// for the same reason.
+/// All arguments are only valid during the execution of the callback, with the exeption of
+/// `user_data_from_c`, where the lifetime is controlled by the caller of this function.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fastosc_register_handler(
     server: *mut OscServer,
@@ -131,6 +167,8 @@ pub unsafe extern "C" fn fastosc_register_handler(
     ApiResult::InvalidArgument
 }
 
+/// Spawn a new thread and listen to the address specified in [`fastosc_server_new`].
+/// The thread can be stopped again using [`fastosc_stop_thread`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fastosc_start_thread(server: *mut OscServer) -> ApiResult {
     unsafe {
@@ -169,6 +207,10 @@ pub unsafe extern "C" fn fastosc_register_error_handler(
         }
     }
 }
+
+/// Stop the server thread started by [`fastosc_start_thread`] safely. The message that is
+/// currently processing will be finished, after that the thread exits. A stopped thread can be
+/// started again.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fastosc_stop_thread(server: *mut OscServer) -> ApiResult {
     unsafe {
