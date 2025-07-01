@@ -1,4 +1,5 @@
-use rosc::OscMessage;
+use rosc::address::OscAddress;
+use rosc::OscType;
 use std::env;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::str::FromStr;
@@ -24,9 +25,10 @@ fn main() {
     server
         .register_handler(
             "/test",
+            "",
             Box::new(
-                |msg: &OscMessage, _from_addr: &SocketAddr, _user_data: Option<_>| {
-                    println!("Hi, {0}, {1:#?}", msg.addr, msg.args)
+                |path: &OscAddress, args: &Vec<OscType>, _from_addr: &SocketAddr, _user_data: Option<_>| {
+                    println!("Hi, {0}, {1:#?}", path, args)
                 },
             ),
             None,
@@ -35,9 +37,10 @@ fn main() {
     server
         .register_handler(
             "/test2",
+            "",
             Box::new(
-                |msg: &OscMessage, _from_addr: &SocketAddr, _user_data: Option<_>| {
-                    println!("Hi, {0}, {1:#?}", msg.addr, msg.args)
+                |path: &OscAddress, args: &Vec<OscType>, _from_addr: &SocketAddr, _user_data: Option<_>| {
+                    println!("Hi, {0}, {1:#?}", path, args)
                 },
             ),
             None,
@@ -46,9 +49,10 @@ fn main() {
     server
         .register_handler(
             "/test5",
+            "",
             Box::new(
-                |msg: &OscMessage, _from_addr: &SocketAddr, _user_data: Option<_>| {
-                    println!("Hi, {0}, {1:#?}", msg.addr, msg.args)
+                |path: &OscAddress, args: &Vec<OscType>, _from_addr: &SocketAddr, _user_data: Option<_>| {
+                    println!("Hi, {0}, {1:#?}", path, args)
                 },
             ),
             None,
