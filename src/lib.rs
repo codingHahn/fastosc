@@ -250,14 +250,15 @@ impl OscServer {
             .map_err(|_| FastOscError::RegisterHandlerError)?;
 
         lock.stop = true;
-        if let Some(th) = lock.thread_handle.take() {
-            th.join().map_err(|_| FastOscError::ThreadPanic)?;
-        };
+        let mut ret = Ok(());
+            if let Some(th) = lock.thread_handle.take() {
+                ret = th.join().map_err(|_| FastOscError::ThreadPanic);
+            };
 
         // Reset the stop condition variable to allow starting the thread again
         lock.stop = false;
 
-        Ok(())
+        ret
     }
 }
 
