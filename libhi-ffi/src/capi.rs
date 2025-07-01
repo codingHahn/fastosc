@@ -31,7 +31,7 @@ unsafe impl Send for SendVoidPtr {}
 impl Copy for SendVoidPtr {}
 impl Clone for SendVoidPtr {
     fn clone(&self) -> Self {
-        SendVoidPtr(self.0)
+        *self
     }
 }
 
@@ -129,7 +129,7 @@ pub unsafe extern "C" fn fastosc_register_handler(
                     type_str.push(osc_type_to_char(t.clone()));
                 }
                 let cs = CString::new(type_str.iter().collect::<String>()).unwrap();
-                let type_str_c = SendCharPtr(cs.as_ptr() as *const i8);
+                let type_str_c = SendCharPtr(cs.as_ptr());
                 let user_data_c: SendVoidPtr = match user_data.clone() {
                     Some(data) => *data.lock().unwrap().downcast_ref::<SendVoidPtr>().unwrap(),
                     None => SendVoidPtr(ptr::null()),
