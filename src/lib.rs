@@ -127,18 +127,28 @@ impl OscServerInternal {
     }
 }
 
+/// OSC server instance which holds data about, such as the thread handle, address handlers and the
+/// UDP socket. Instances of this object can be cloned and copied, because the data is protected by
+/// an [`Arc`] [`Mutex`].
 #[derive(Clone)]
 pub struct OscServer {
     internal: Arc<Mutex<OscServerInternal>>,
 }
 
 impl OscServer {
+    /// Build and return a new instance of [`OscServer`] from an [`SocketAddrV4`]. This is fails
+    /// when it can't bind to the IP. This happens if the IP/port combination is already in use or
+    /// it can't bind to the IP.
     pub fn new_from_ip(addr: SocketAddrV4) -> Result<Self, Error> {
         let sock = UdpSocket::bind(addr)?;
         let intern = Arc::new(Mutex::new(OscServerInternal::new(sock)));
         Ok(OscServer { internal: intern })
     }
 
+    /// Registers a closure `callback` for a given OSC address `path`. Currently, only addresses
+    /// without address patterns are supported.
+    /// Optionally, arbitrary data `user_data` can be provided, which will be avalable to the
+    /// callback closure when it is called.
     pub fn register_handler(
         &self,
         path: &str,
@@ -157,6 +167,8 @@ impl OscServer {
         Err(FastOscError::RegisterHandlerError)
     }
 
+    /// Registers an error closure `callback` which will be called with the error message. This is
+    /// optional.
     pub fn register_error_handler(
         &self,
         callback: impl Fn(&str) + 'static + Send,
@@ -194,6 +206,13 @@ impl OscServer {
         lock.send_packet(packet, to_addr)
     }
 
+    /// Starts an OSC server with the configured options in a seperate thread. It is still possible
+    /// to modify the handlers and other configuration while the thread is running.
+    /// Please note: The UDP socket is opened upon creation of the [`OscServer`] object. Packets
+    /// recieved after creating the object and calling this method will be processed immedeatly
+    /// after calling this method.
+    ///
+    /// It is possible to stop the thread using [`OscServer::stop_thread`].
     pub fn start_thread(&mut self) -> Result<(), FastOscError> {
         let serv = self.clone();
         let server_handle = std::thread::spawn(move || {
@@ -221,6 +240,9 @@ impl OscServer {
         Ok(())
     }
 
+    /// Stops the thread started by [`OscServer::start_thread`]. The thread will finish processing
+    /// a packet if it is in the middle of doing so.
+    /// A thread can be started again by calling `start_thread`.
     pub fn stop_thread(&mut self) -> Result<(), FastOscError> {
         let mut lock = self
             .internal
