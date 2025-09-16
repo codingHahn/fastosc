@@ -1,5 +1,5 @@
-use rosc::address::OscAddress;
 use rosc::OscType;
+use rosc::address::OscAddress;
 use std::env;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::str::FromStr;
@@ -27,9 +27,10 @@ fn main() {
             "/test",
             "",
             Box::new(
-                |path: &OscAddress, args: &Vec<OscType>, _from_addr: &SocketAddr, _user_data: Option<_>| {
-                    println!("Hi, {0}, {1:#?}", path, args)
-                },
+                |path: &OscAddress,
+                 args: &Vec<OscType>,
+                 _from_addr: &SocketAddr,
+                 _user_data: Option<_>| { println!("Hi, {0}, {1:#?}", path, args) },
             ),
             None,
         )
@@ -39,9 +40,10 @@ fn main() {
             "/test2",
             "",
             Box::new(
-                |path: &OscAddress, args: &Vec<OscType>, _from_addr: &SocketAddr, _user_data: Option<_>| {
-                    println!("Hi, {0}, {1:#?}", path, args)
-                },
+                |path: &OscAddress,
+                 args: &Vec<OscType>,
+                 _from_addr: &SocketAddr,
+                 _user_data: Option<_>| { println!("Hi, {0}, {1:#?}", path, args) },
             ),
             None,
         )
@@ -51,9 +53,10 @@ fn main() {
             "/test5",
             "",
             Box::new(
-                |path: &OscAddress, args: &Vec<OscType>, _from_addr: &SocketAddr, _user_data: Option<_>| {
-                    println!("Hi, {0}, {1:#?}", path, args)
-                },
+                |path: &OscAddress,
+                 args: &Vec<OscType>,
+                 _from_addr: &SocketAddr,
+                 _user_data: Option<_>| { println!("Hi, {0}, {1:#?}", path, args) },
             ),
             None,
         )
