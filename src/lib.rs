@@ -390,7 +390,7 @@ pub fn osctype_coerce(from: &OscType, to: &OscType) -> OscType {
 pub fn coerce_arguments(src_list: &[OscType], types: &[char]) -> Vec<OscType> {
     let mut coerced_arguments = vec![];
     if src_list.len() == types.len() {
-        for i in 0..src_list.len() - 1 {
+        for i in 0..src_list.len() {
             let temp_destination_type = char_to_osc_type(types[i]);
             if osc_type_to_char(&src_list[i]) == types[i] {
                 coerced_arguments.push(src_list[i].clone());
