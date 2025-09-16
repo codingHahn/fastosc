@@ -254,7 +254,10 @@ impl OscServer {
                                 let error_str = format!("FastOscError: {err:#?}");
                                 (handler)(&error_str);
                             }
-                            None => todo!(),
+                            // Explicitly do nothing if no error handler is registered.
+                            // TODO: Maybe register a dummy handler, which dumps to
+                            // stdout/stderror?
+                            None => (),
                         }
                     }
                 }
