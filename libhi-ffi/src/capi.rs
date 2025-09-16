@@ -70,6 +70,11 @@ pub extern "C" fn fastosc_server_new(addr: *const c_char) -> *mut OscServer {
 }
 
 /// Frees a server created by [`fastosc_server_new`].
+///
+/// # Safety
+///
+/// Calling this function with a pointer that was not allocated by [`fastosc_server_new`] is UB and
+/// may lead to a segfault.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fastosc_server_free(server: *mut OscServer) {
     if !server.is_null() {

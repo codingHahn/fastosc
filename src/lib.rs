@@ -243,6 +243,8 @@ impl OscServer {
     pub fn start_thread(&mut self) -> Result<(), FastOscError> {
         let serv = self.clone();
         let server_handle = std::thread::spawn(move || {
+            // Event loop. Blocks in [`OscServerInternal::recv()`] until new packet arrives. When
+            // that function errors, it gets handled here.
             loop {
                 if let Err(err) = serv.recv() {
                     if let Ok(lock) = serv.internal.lock() {
