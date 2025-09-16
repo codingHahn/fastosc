@@ -1,7 +1,8 @@
 //! This crate is inspired by the C API from liblo.
-use rosc::{OscMessage, OscType};
+use libhi::rosc::address::OscAddress;
+use rosc::OscType;
 use std::any::Any;
-use std::ffi::{CStr, CString, c_char, c_void};
+use std::ffi::{self, CStr, CString, c_char, c_void};
 use std::net::{SocketAddr, SocketAddrV4};
 use std::ptr::{self};
 use std::str::FromStr;
@@ -90,7 +91,7 @@ pub unsafe extern "C" fn fastosc_server_free(server: *mut OscServer) {
 /// - osc_types as `const char*`: A string of the recieved arguments in the OSC message, starting
 ///   with `,`
 /// - socket_addr as `const SocketAddr*`: A struct holding source IP and port of the osc message
-/// - osc_arguments as `const OscType**`: A list of arguments in the message with length `len`
+/// - osc_arguments as `const void**`: A list of arguments in the message with length `len`
 /// - len as `int_32`: Length of the osc_arguments list
 /// - user_data as `void *`: `user_data_from_c` will be passed to this
 ///
@@ -107,11 +108,12 @@ pub unsafe extern "C" fn fastosc_server_free(server: *mut OscServer) {
 pub unsafe extern "C" fn fastosc_register_handler(
     server: *mut OscServer,
     path: *const c_char,
+    types: *const c_char,
     callback: extern "C" fn(
         *const c_char,
         *const c_char,
         *const SocketAddr,
-        *const OscType,
+        *const *const c_void,
         i32,
         *const c_void,
     ),
@@ -119,48 +121,61 @@ pub unsafe extern "C" fn fastosc_register_handler(
 ) -> ApiResult {
     let wrapped_path = SendCharPtr(path);
     if let Ok(safe_path) = { unsafe { std::ffi::CStr::from_ptr(path).to_str() } } {
-        let callback_translator =
-            move |osc_message: &OscMessage,
-                  from_addr: &SocketAddr,
-                  user_data: Option<Arc<Mutex<Box<dyn Any + Send>>>>| {
-                let arg_count = osc_message.args.len() as i32;
-                let mut type_str = vec![','];
-                for t in &osc_message.args {
-                    type_str.push(osc_type_to_char(t.clone()));
-                }
-                let cs = CString::new(type_str.iter().collect::<String>()).unwrap();
-                let type_str_c = SendCharPtr(cs.as_ptr());
-                let user_data_c: SendVoidPtr = match user_data.clone() {
-                    Some(data) => *data.lock().unwrap().downcast_ref::<SendVoidPtr>().unwrap(),
-                    None => SendVoidPtr(ptr::null()),
-                };
-                (callback)(
-                    wrapped_path.get_ptr(),
-                    type_str_c.get_ptr(),
-                    from_addr as *const SocketAddr,
-                    osc_message.args.as_ptr(),
-                    arg_count,
-                    user_data_c.get_ptr(),
-                );
-            };
-        unsafe {
-            match server.as_mut() {
-                Some(server) => {
-                    let user_data = user_data_from_c.as_ref().map(|user_data| {
-                        Arc::new(Mutex::new(
-                            Box::new(SendVoidPtr(user_data)) as Box<dyn std::any::Any + Send>
-                        ))
-                    });
-                    if server
-                        .register_handler(safe_path, callback_translator, user_data)
-                        .is_ok()
-                    {
-                        return ApiResult::Success;
-                    } else {
-                        return ApiResult::MutexFailError;
+        if let Ok(safe_types) = { unsafe { std::ffi::CStr::from_ptr(types).to_str() } } {
+            let callback_translator =
+                move |_osc_addr: &OscAddress,
+                      osc_args: &Vec<OscType>,
+                      from_addr: &SocketAddr,
+                      user_data: Option<Arc<Mutex<Box<dyn Any + Send>>>>| {
+                    let mut type_str = vec![];
+                    for t in osc_args {
+                        type_str.push(osc_type_to_char(t));
                     }
+                    let cs = CString::new(type_str.iter().collect::<String>()).unwrap();
+                    let type_str_c = SendCharPtr(cs.as_ptr());
+                    let user_data_c: SendVoidPtr = match user_data.clone() {
+                        Some(data) => *data.lock().unwrap().downcast_ref::<SendVoidPtr>().unwrap(),
+                        None => SendVoidPtr(ptr::null()),
+                    };
+                    let c_args: Vec<*const c_void> =
+                        osc_args.iter().map(osctype_to_void_ptr).collect();
+                    (callback)(
+                        wrapped_path.get_ptr(),
+                        type_str_c.get_ptr(),
+                        from_addr as *const SocketAddr,
+                        c_args.as_ptr(),
+                        c_args.len() as i32,
+                        user_data_c.get_ptr(),
+                    );
+                    // Prevent memory leak by owning all strings from c_args again.
+                    // They were allocated by CString::into_raw which leaks without ::from_raw
+                    for (c, arg) in std::iter::zip(type_str, c_args) {
+                        if c == 's' {
+                            unsafe {
+                                let _ = CString::from_raw(arg as *mut c_char);
+                            }
+                        }
+                    }
+                };
+            unsafe {
+                match server.as_mut() {
+                    Some(server) => {
+                        let user_data = user_data_from_c.as_ref().map(|user_data| {
+                            Arc::new(Mutex::new(
+                                Box::new(SendVoidPtr(user_data)) as Box<dyn std::any::Any + Send>
+                            ))
+                        });
+                        if server
+                            .register_handler(safe_path, safe_types, callback_translator, user_data)
+                            .is_ok()
+                        {
+                            return ApiResult::Success;
+                        } else {
+                            return ApiResult::MutexFailError;
+                        }
+                    }
+                    None => return ApiResult::NullHandleError,
                 }
-                None => return ApiResult::NullHandleError,
             }
         }
     }
@@ -172,7 +187,7 @@ pub unsafe extern "C" fn fastosc_register_handler(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fastosc_start_thread(server: *mut OscServer) -> ApiResult {
     unsafe {
-        match server.as_mut() {
+        let ret = match server.as_mut() {
             Some(server) => {
                 if server.start_thread().is_err() {
                     return ApiResult::MutexFailError;
@@ -180,7 +195,8 @@ pub unsafe extern "C" fn fastosc_start_thread(server: *mut OscServer) -> ApiResu
                 ApiResult::Success
             }
             None => ApiResult::NullHandleError,
-        }
+        };
+        return ret;
     }
 }
 
@@ -244,7 +260,7 @@ pub unsafe extern "C" fn fastosc_get_ip_of_socket_addr(
 pub unsafe extern "C" fn fastosc_free_ip_of_socket_addr(addr_part: *mut char) {
     unsafe {
         if addr_part.is_null() {
-            return ();
+            return;
         }
         // Reconstruct a CString from the pointer and drop it
         let _ = CString::from_raw(addr_part as *mut i8);
@@ -274,5 +290,22 @@ pub unsafe extern "C" fn fastosc_set_port_of_socket_addr(
             }
             None => ApiResult::NullHandleError,
         }
+    }
+}
+
+#[unsafe(no_mangle)]
+fn osctype_to_void_ptr(t: &OscType) -> *const c_void {
+    match t {
+        OscType::Int(i) => i as *const ffi::c_int as *const c_void,
+        OscType::Float(i) => i as *const ffi::c_float as *const c_void,
+        OscType::String(i) => CString::new(i.as_str()).unwrap().into_raw() as *const c_void,
+        OscType::Blob(_) => todo!(),
+        OscType::Long(i) => i as *const ffi::c_long as *const c_void,
+        OscType::Double(i) => i as *const ffi::c_double as *const c_void,
+        OscType::Char(i) => {
+            <char as TryInto<u8>>::try_into(*i).unwrap() as *const u8 as *const c_void
+        }
+        OscType::Bool(i) => i as *const bool as *const c_void,
+        _ => todo!(),
     }
 }
