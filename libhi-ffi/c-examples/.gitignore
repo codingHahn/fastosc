@@ -1,0 +1,11 @@
+# Ignore all files ... (to automatically exclude binary builds but not source files)
+*
+# ... but no folders
+!*/
+# ... and no files with extensions
+!*.*
+
+# Exceptions
+!Makefile
+compile_commands.json
+.cache/
