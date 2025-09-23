@@ -1,8 +1,9 @@
 //! This crate is inspired by the C API from liblo.
+use libhi::rosc::OscError;
 use libhi::rosc::address::OscAddress;
 use rosc::OscType;
 use std::any::Any;
-use std::ffi::{self, CStr, CString, c_char, c_void};
+use std::ffi::{self, CStr, CString, c_char, c_double, c_float, c_int, c_long, c_ushort, c_void};
 use std::net::{SocketAddr, SocketAddrV4};
 use std::ptr::{self};
 use std::str::FromStr;
@@ -82,6 +83,95 @@ pub unsafe extern "C" fn fastosc_server_free(server: *mut OscServer) {
     };
 }
 
+/// Add an int response to the [`OscAnswer`].
+///
+/// # Safety
+/// `answer` must be a valid [`OscAnswer`] passed to the callback.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fastosc_answer_add_int(answer: *mut OscAnswer, arg: c_int) -> ApiResult {
+    if !answer.is_null() {
+        unsafe { Box::from_raw(answer).add_argument(OscType::Int(arg)) };
+        return ApiResult::Success;
+    };
+
+    ApiResult::NullHandleError
+}
+
+/// Add a float response to the [`OscAnswer`].
+///
+/// # Safety
+/// `answer` must be a valid [`OscAnswer`] passed to the callback.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fastosc_answer_add_float(
+    answer: *mut OscAnswer,
+    arg: c_float,
+) -> ApiResult {
+    if !answer.is_null() {
+        unsafe { Box::from_raw(answer).add_argument(OscType::Float(arg)) };
+        return ApiResult::Success;
+    };
+
+    ApiResult::NullHandleError
+}
+
+/// Add a string response to the [`OscAnswer`].
+///
+/// # Safety
+/// `answer` must be a valid [`OscAnswer`] passed to the callback.
+/// If the string is not valid, it is replaced by an empty string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fastosc_answer_add_string(
+    answer: *mut OscAnswer,
+    arg: *const c_char,
+) -> ApiResult {
+    if !answer.is_null() {
+        let cstring = unsafe { CStr::from_ptr(arg.cast_mut()) };
+        let safe_arg = cstring.to_str().unwrap_or("").to_owned();
+        unsafe { Box::from_raw(answer).add_argument(OscType::String(safe_arg)) };
+        return ApiResult::Success;
+    };
+
+    ApiResult::NullHandleError
+}
+
+/// Set the port the [`OscAnswer`] is sent back to.
+///
+/// # Safety
+/// `answer` must be a valid [`OscAnswer`] passed to the callback.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fastosc_answer_set_port(
+    answer: *mut OscAnswer,
+    port: c_ushort,
+) -> ApiResult {
+    if !answer.is_null() {
+        unsafe {
+            Box::from_raw(answer).set_port(port);
+        }
+        return ApiResult::Success;
+    }
+
+    ApiResult::NullHandleError
+}
+
+/// Marks an [`OscAnswer`] to be sent after the callback returns.
+///
+/// # Safety
+/// `answer` must be a valid [`OscAnswer`] passed to the callback.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fastosc_answer_mark_send(
+    answer: *mut OscAnswer,
+    will_be_sent: bool,
+) -> ApiResult {
+    if !answer.is_null() {
+        unsafe {
+            Box::from_raw(answer).mark_send(will_be_sent);
+        };
+        return ApiResult::Success;
+    };
+
+    ApiResult::NullHandleError
+}
+
 /// Register a handler that responds to the address specified in the argument `path`.
 ///
 /// `user_data_from_c` can either be `NULL` or an arbitrary pointer to some data that
@@ -99,6 +189,8 @@ pub unsafe extern "C" fn fastosc_server_free(server: *mut OscServer) {
 /// - osc_arguments as `const void**`: A list of arguments in the message with length `len`
 /// - len as `int_32`: Length of the osc_arguments list
 /// - user_data as `void *`: `user_data_from_c` will be passed to this
+/// - osc_answer as `OscAnswer*`: An OSC answer prepopulated with the osc address and return ip
+///   address. Can be modified by the `fastosc_answer` functions
 ///
 /// # Safety
 ///
@@ -121,66 +213,67 @@ pub unsafe extern "C" fn fastosc_register_handler(
         *const *const c_void,
         i32,
         *const c_void,
+        *mut OscAnswer,
     ),
     user_data_from_c: *const c_void,
 ) -> ApiResult {
     let wrapped_path = SendCharPtr(path);
-    if let Ok(safe_path) = { unsafe { std::ffi::CStr::from_ptr(path).to_str() } } {
-        if let Ok(safe_types) = { unsafe { std::ffi::CStr::from_ptr(types).to_str() } } {
-            let callback_translator =
-                move |_osc_addr: &OscAddress,
-                      osc_args: &Vec<OscType>,
-                      from_addr: &SocketAddr,
-                      user_data: Option<Arc<Mutex<Box<dyn Any + Send>>>>| {
-                    let mut type_str = vec![];
-                    for t in osc_args {
-                        type_str.push(osc_type_to_char(t));
+    if let Ok(safe_path) = { unsafe { std::ffi::CStr::from_ptr(path).to_str() } }
+        && let Ok(safe_types) = { unsafe { std::ffi::CStr::from_ptr(types).to_str() } }
+    {
+        let callback_translator = move |_osc_addr: &OscAddress,
+                                        osc_args: &Vec<OscType>,
+                                        from_addr: &SocketAddr,
+                                        user_data: Option<Arc<Mutex<Box<dyn Any + Send>>>>,
+                                        answer: &mut OscAnswer| {
+            let mut type_str = vec![];
+            for t in osc_args {
+                type_str.push(osc_type_to_char(t));
+            }
+            let cs = CString::new(type_str.iter().collect::<String>()).unwrap();
+            let type_str_c = SendCharPtr(cs.as_ptr());
+            let user_data_c: SendVoidPtr = match user_data.clone() {
+                Some(data) => *data.lock().unwrap().downcast_ref::<SendVoidPtr>().unwrap(),
+                None => SendVoidPtr(ptr::null()),
+            };
+            let c_args: Vec<*const c_void> = osc_args.iter().map(osctype_to_void_ptr).collect();
+            (callback)(
+                wrapped_path.get_ptr(),
+                type_str_c.get_ptr(),
+                from_addr as *const SocketAddr,
+                c_args.as_ptr(),
+                c_args.len() as i32,
+                user_data_c.get_ptr(),
+                answer as *mut OscAnswer,
+            );
+            // Prevent memory leak by owning all strings from c_args again.
+            // They were allocated by CString::into_raw which leaks without ::from_raw
+            for (c, arg) in std::iter::zip(type_str, c_args) {
+                if c == 's' {
+                    unsafe {
+                        let _ = CString::from_raw(arg as *mut c_char);
                     }
-                    let cs = CString::new(type_str.iter().collect::<String>()).unwrap();
-                    let type_str_c = SendCharPtr(cs.as_ptr());
-                    let user_data_c: SendVoidPtr = match user_data.clone() {
-                        Some(data) => *data.lock().unwrap().downcast_ref::<SendVoidPtr>().unwrap(),
-                        None => SendVoidPtr(ptr::null()),
-                    };
-                    let c_args: Vec<*const c_void> =
-                        osc_args.iter().map(osctype_to_void_ptr).collect();
-                    (callback)(
-                        wrapped_path.get_ptr(),
-                        type_str_c.get_ptr(),
-                        from_addr as *const SocketAddr,
-                        c_args.as_ptr(),
-                        c_args.len() as i32,
-                        user_data_c.get_ptr(),
-                    );
-                    // Prevent memory leak by owning all strings from c_args again.
-                    // They were allocated by CString::into_raw which leaks without ::from_raw
-                    for (c, arg) in std::iter::zip(type_str, c_args) {
-                        if c == 's' {
-                            unsafe {
-                                let _ = CString::from_raw(arg as *mut c_char);
-                            }
-                        }
-                    }
-                };
-            unsafe {
-                match server.as_mut() {
-                    Some(server) => {
-                        let user_data = user_data_from_c.as_ref().map(|user_data| {
-                            Arc::new(Mutex::new(
-                                Box::new(SendVoidPtr(user_data)) as Box<dyn std::any::Any + Send>
-                            ))
-                        });
-                        if server
-                            .register_handler(safe_path, safe_types, callback_translator, user_data)
-                            .is_ok()
-                        {
-                            return ApiResult::Success;
-                        } else {
-                            return ApiResult::MutexFailError;
-                        }
-                    }
-                    None => return ApiResult::NullHandleError,
                 }
+            }
+        };
+        unsafe {
+            match server.as_mut() {
+                Some(server) => {
+                    let user_data = user_data_from_c.as_ref().map(|user_data| {
+                        Arc::new(Mutex::new(
+                            Box::new(SendVoidPtr(user_data)) as Box<dyn std::any::Any + Send>
+                        ))
+                    });
+                    if server
+                        .register_handler(safe_path, safe_types, callback_translator, user_data)
+                        .is_ok()
+                    {
+                        return ApiResult::Success;
+                    } else {
+                        return ApiResult::MutexFailError;
+                    }
+                }
+                None => return ApiResult::NullHandleError,
             }
         }
     }
@@ -192,7 +285,7 @@ pub unsafe extern "C" fn fastosc_register_handler(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fastosc_start_thread(server: *mut OscServer) -> ApiResult {
     unsafe {
-        let ret = match server.as_mut() {
+        match server.as_mut() {
             Some(server) => {
                 if server.start_thread().is_err() {
                     return ApiResult::MutexFailError;
@@ -200,8 +293,7 @@ pub unsafe extern "C" fn fastosc_start_thread(server: *mut OscServer) -> ApiResu
                 ApiResult::Success
             }
             None => ApiResult::NullHandleError,
-        };
-        return ret;
+        }
     }
 }
 

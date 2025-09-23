@@ -19,6 +19,7 @@ pub enum FastOscError {
     MutexFail,
     RegisterHandlerError,
     ThreadPanic,
+    NullHandle,
 }
 
 /// Maps an `OScAddress` to a closure which has to be sent,
@@ -27,8 +28,13 @@ type AddressToCallbackMap = HashMap<OscAddress, CallbackWithUserdata>;
 
 struct CallbackWithUserdata {
     callback: Box<
-        dyn Fn(&OscAddress, &Vec<OscType>, &SocketAddr, Option<Arc<Mutex<Box<dyn Any + Send>>>>)
-            + Send
+        dyn Fn(
+                &OscAddress,
+                &Vec<OscType>,
+                &SocketAddr,
+                Option<Arc<Mutex<Box<dyn Any + Send>>>>,
+                &mut OscAnswer,
+            ) + Send
             + 'static,
     >,
     types: Vec<char>,
@@ -64,6 +70,7 @@ impl OscServerInternal {
             &Vec<OscType>,
             &SocketAddr,
             Option<Arc<Mutex<Box<dyn Any + Send>>>>,
+            &mut OscAnswer,
         )
         + 'static
         + Send,
@@ -81,62 +88,84 @@ impl OscServerInternal {
         self.error_handler = Some(Box::new(callback));
     }
 
-    fn recv(&self) -> Result<(), OscError> {
+    fn recv(&self) -> Result<(), FastOscError> {
         let mut buf = [0u8; rosc::decoder::MTU];
         match self.sock.recv_from(&mut buf) {
             Ok((size, addr)) => {
                 println!("Received packet with size {} from: {}", size, addr);
-                let (_, packet) = rosc::decoder::decode_udp(&buf[..size])?;
+                let (_, packet) =
+                    rosc::decoder::decode_udp(&buf[..size]).map_err(FastOscError::OscError)?;
                 self.handle_packet(packet, addr)?;
                 Ok(())
             }
             Err(e) => {
                 println!("Error receiving from socket: {}", e);
-                Err(e).map_err(|_| OscError::BadPacket("Error recieving from socket"))
+                Err(e).map_err(|_| {
+                    FastOscError::OscError(OscError::BadPacket("Error recieving from socket"))
+                })
             }
         }
     }
 
-    fn handle_packet(&self, packet: OscPacket, from_addr: SocketAddr) -> Result<(), OscError> {
+    fn handle_message(
+        &self,
+        callback: &CallbackWithUserdata,
+        osc_address: &OscAddress,
+        args: &[OscType],
+        from_addr: SocketAddr,
+    ) -> Result<(), FastOscError> {
+        let coerced_arguments = coerce_arguments(args, &callback.types);
+        let mut answer = OscAnswer {
+            msg: rosc::OscMessage {
+                addr: osc_address.to_string(),
+                args: vec![],
+            },
+            to_addr: from_addr,
+            will_be_sent: false,
+        };
+        (callback.callback)(
+            osc_address,
+            &coerced_arguments,
+            &from_addr,
+            callback.user_data.clone(),
+            &mut answer,
+        );
+        if answer.will_be_sent {
+            self.send_packet(OscPacket::Message(answer.msg), answer.to_addr)?;
+        }
+        Ok(())
+    }
+
+    fn handle_packet(&self, packet: OscPacket, from_addr: SocketAddr) -> Result<(), FastOscError> {
         match packet {
             OscPacket::Message(msg) => {
                 if let Ok(address) = OscAddress::new(msg.addr.clone()) {
                     if let Some(callback_with_userdata) = self.message_handlers.get(&address) {
-                        let coerced_arguments =
-                            coerce_arguments(&msg.args, &callback_with_userdata.types);
-                        (callback_with_userdata.callback)(
+                        self.handle_message(
+                            callback_with_userdata,
                             &address,
-                            &coerced_arguments,
-                            &from_addr,
-                            callback_with_userdata.user_data.clone(),
-                        );
-                        return Ok(());
+                            &msg.args,
+                            from_addr,
+                        )?;
                     }
                 } else if let Ok(matcher) = Matcher::new(&msg.addr) {
                     for (addr, handler) in self.message_handlers.iter() {
                         if matcher.match_address(addr) {
-                            let coerced_arguments = coerce_arguments(&msg.args, &handler.types);
-                            (handler.callback)(
-                                addr,
-                                &coerced_arguments,
-                                &from_addr,
-                                handler.user_data.clone(),
-                            );
+                            self.handle_message(handler, addr, &msg.args, from_addr)?;
                         }
                     }
                     return Ok(());
                 }
                 println!("No handler for path: {0}", msg.addr);
-                Err(OscError::Unimplemented)
             }
 
             OscPacket::Bundle(bundle) => {
                 for item in bundle.content {
                     self.handle_packet(item, from_addr)?;
                 }
-                Ok(())
             }
         }
+        Ok(())
     }
 
     pub fn send_packet(&self, packet: OscPacket, to_addr: SocketAddr) -> Result<(), FastOscError> {
@@ -179,6 +208,7 @@ impl OscServer {
             &Vec<OscType>,
             &SocketAddr,
             Option<Arc<Mutex<Box<dyn Any + Send>>>>,
+            &mut OscAnswer,
         )
         + 'static
         + Send,
@@ -212,7 +242,6 @@ impl OscServer {
             .lock()
             .map_err(|_| FastOscError::MutexFail)?
             .recv()
-            .map_err(FastOscError::OscError)
     }
 
     pub fn handle_packet(
@@ -224,7 +253,6 @@ impl OscServer {
             .lock()
             .map_err(|_| FastOscError::RegisterHandlerError)?
             .handle_packet(packet, from_addr)
-            .map_err(FastOscError::OscError)
     }
 
     pub fn send_packet(&self, packet: OscPacket, to_addr: SocketAddr) -> Result<(), FastOscError> {
@@ -246,22 +274,19 @@ impl OscServer {
             // Event loop. Blocks in [`OscServerInternal::recv()`] until new packet arrives. When
             // that function errors, it gets handled here.
             loop {
-                if let Err(err) = serv.recv() {
-                    if let Ok(lock) = serv.internal.lock() {
-                        if lock.stop {
-                            break;
-                        }
-                        match &lock.error_handler {
-                            Some(handler) => {
-                                let error_str = format!("FastOscError: {err:#?}");
-                                (handler)(&error_str);
-                            }
-                            // Explicitly do nothing if no error handler is registered.
-                            // TODO: Maybe register a dummy handler, which dumps to
-                            // stdout/stderror?
-                            None => (),
-                        }
+                if let Err(err) = serv.recv()
+                    && let Ok(lock) = serv.internal.lock()
+                {
+                    if lock.stop {
+                        break;
                     }
+                    if let Some(handler) = &lock.error_handler {
+                        let error_str = format!("FastOscError: {err:#?}");
+                        (handler)(&error_str);
+                    }
+                    // Explicitly do nothing if no error handler is registered.
+                    // TODO: Maybe register a dummy handler, which dumps to
+                    // stdout/stderror?
                 }
             }
         });
@@ -291,6 +316,51 @@ impl OscServer {
         lock.stop = false;
 
         ret
+    }
+
+    /// Serialize an OscPacket to bytes to send over the network
+    pub fn serialize_packet(packet: OscPacket) -> Result<Vec<u8>, FastOscError> {
+        rosc::encoder::encode(&packet).map_err(FastOscError::OscError)
+    }
+}
+
+/// An answer that can be prepared by the user in the callback to be sent back.
+/// After filling the struct with the arguments using [`OscAnswer::add_argument`] and setting the
+/// port
+pub struct OscAnswer {
+    msg: rosc::OscMessage,
+    to_addr: SocketAddr,
+    will_be_sent: bool,
+}
+
+impl OscAnswer {
+    /// Set the ip address and port where the packet is returned to. This function should not be
+    /// that useful, since the return address is prepopulated to the ip where the request came
+    /// from.
+    pub fn set_return_address(&mut self, addr: &SocketAddr) {
+        self.to_addr = *addr;
+    }
+
+    /// Set the port where the answer is returned to. Use this functions if you want the answer to
+    /// be sent to the ip where the request came from.
+    pub fn set_port(&mut self, port: u16) {
+        self.to_addr.set_port(port);
+    }
+
+    /// Replace all arguments of the answer
+    pub fn replace_arguments(&mut self, args: Vec<OscType>) {
+        self.msg.args = args;
+    }
+
+    /// Add a single argument to the answer. The order of multiple calls of this function
+    /// determines the order of arguments in the answer.
+    pub fn add_argument(&mut self, arg: OscType) {
+        self.msg.args.push(arg);
+    }
+
+    /// Marks the answer to be sent after the callback if `will_be_sent` is set to true
+    pub fn mark_send(&mut self, will_be_sent: bool) {
+        self.will_be_sent = will_be_sent;
     }
 }
 
@@ -360,13 +430,10 @@ pub fn osctype_is_coercible(a: &OscType, b: &OscType) -> bool {
 }
 
 pub fn osctype_is_numerical(a: &OscType) -> bool {
-    match a {
-        OscType::Int(_) => true,
-        OscType::Float(_) => true,
-        OscType::Long(_) => true,
-        OscType::Double(_) => true,
-        _ => false,
-    }
+    matches!(
+        a,
+        OscType::Int(_) | OscType::Float(_) | OscType::Long(_) | OscType::Double(_)
+    )
 }
 
 pub fn osctype_coerce(from: &OscType, to: &OscType) -> OscType {

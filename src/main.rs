@@ -5,7 +5,7 @@ use std::net::{SocketAddr, SocketAddrV4};
 use std::str::FromStr;
 use std::time::Duration;
 
-use libhi::OscServer;
+use libhi::{OscAnswer, OscServer};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -30,7 +30,10 @@ fn main() {
                 |path: &OscAddress,
                  args: &Vec<OscType>,
                  _from_addr: &SocketAddr,
-                 _user_data: Option<_>| { println!("Hi, {0}, {1:#?}", path, args) },
+                 _user_data: Option<_>,
+                 _answer: &mut OscAnswer| {
+                    println!("Hi, {0}, {1:#?}", path, args)
+                },
             ),
             None,
         )
@@ -43,20 +46,29 @@ fn main() {
                 |path: &OscAddress,
                  args: &Vec<OscType>,
                  _from_addr: &SocketAddr,
-                 _user_data: Option<_>| { println!("Hi, {0}, {1:#?}", path, args) },
+                 _user_data: Option<_>,
+                 _answer: &mut OscAnswer| {
+                    println!("Hi, {0}, {1:#?}", path, args)
+                },
             ),
             None,
         )
         .unwrap();
     server
         .register_handler(
-            "/test5",
-            "",
+            "/with_response",
+            "i",
             Box::new(
-                |path: &OscAddress,
+                |_path: &OscAddress,
                  args: &Vec<OscType>,
                  _from_addr: &SocketAddr,
-                 _user_data: Option<_>| { println!("Hi, {0}, {1:#?}", path, args) },
+                 _user_data: Option<_>,
+                 answer: &mut OscAnswer| {
+                    answer.replace_arguments(args.to_vec());
+                    answer.set_port(50010);
+                    answer.mark_send(true);
+                    println!("Hi");
+                },
             ),
             None,
         )
