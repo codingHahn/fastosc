@@ -1,9 +1,8 @@
 //! This crate is inspired by the C API from liblo.
-use libhi::rosc::OscError;
 use libhi::rosc::address::OscAddress;
 use rosc::OscType;
 use std::any::Any;
-use std::ffi::{self, CStr, CString, c_char, c_double, c_float, c_int, c_long, c_ushort, c_void};
+use std::ffi::{self, CStr, CString, c_char, c_float, c_int, c_uint, c_ushort, c_void};
 use std::net::{SocketAddr, SocketAddrV4};
 use std::ptr::{self};
 use std::str::FromStr;
@@ -51,10 +50,10 @@ pub enum ApiResult {
 ///
 /// Returns a nullptr if the address is invalid or already in use.
 ///
-/// To start the server thread (and actually recieve messages, call [`fastosc_start_thread`].
-/// To free the server, call [`fastosc_server_free`].
+/// To start the server thread (and actually recieve messages, call [`hi_start_thread`].
+/// To free the server, call [`hi_server_free`].
 #[unsafe(no_mangle)]
-pub extern "C" fn fastosc_server_new(addr: *const c_char) -> *mut OscServer {
+pub extern "C" fn hi_server_new(addr: *const c_char) -> *mut OscServer {
     if addr.is_null() {
         return ptr::null_mut();
     }
@@ -70,14 +69,14 @@ pub extern "C" fn fastosc_server_new(addr: *const c_char) -> *mut OscServer {
     }
 }
 
-/// Frees a server created by [`fastosc_server_new`].
+/// Frees a server created by [`hi_server_new`].
 ///
 /// # Safety
 ///
-/// Calling this function with a pointer that was not allocated by [`fastosc_server_new`] is UB and
+/// Calling this function with a pointer that was not allocated by [`hi_server_new`] is UB and
 /// may lead to a segfault.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fastosc_server_free(server: *mut OscServer) {
+pub unsafe extern "C" fn hi_server_free(server: *mut OscServer) {
     if !server.is_null() {
         let _ = unsafe { Box::from_raw(server).stop_thread() };
     };
@@ -88,7 +87,7 @@ pub unsafe extern "C" fn fastosc_server_free(server: *mut OscServer) {
 /// # Safety
 /// `answer` must be a valid [`OscAnswer`] passed to the callback.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fastosc_answer_add_int(answer: *mut OscAnswer, arg: c_int) -> ApiResult {
+pub unsafe extern "C" fn hi_answer_add_int(answer: *mut OscAnswer, arg: c_int) -> ApiResult {
     if !answer.is_null() {
         unsafe { Box::from_raw(answer).add_argument(OscType::Int(arg)) };
         return ApiResult::Success;
@@ -102,10 +101,7 @@ pub unsafe extern "C" fn fastosc_answer_add_int(answer: *mut OscAnswer, arg: c_i
 /// # Safety
 /// `answer` must be a valid [`OscAnswer`] passed to the callback.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fastosc_answer_add_float(
-    answer: *mut OscAnswer,
-    arg: c_float,
-) -> ApiResult {
+pub unsafe extern "C" fn hi_answer_add_float(answer: *mut OscAnswer, arg: c_float) -> ApiResult {
     if !answer.is_null() {
         unsafe { Box::from_raw(answer).add_argument(OscType::Float(arg)) };
         return ApiResult::Success;
@@ -120,7 +116,7 @@ pub unsafe extern "C" fn fastosc_answer_add_float(
 /// `answer` must be a valid [`OscAnswer`] passed to the callback.
 /// If the string is not valid, it is replaced by an empty string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fastosc_answer_add_string(
+pub unsafe extern "C" fn hi_answer_add_string(
     answer: *mut OscAnswer,
     arg: *const c_char,
 ) -> ApiResult {
@@ -139,10 +135,7 @@ pub unsafe extern "C" fn fastosc_answer_add_string(
 /// # Safety
 /// `answer` must be a valid [`OscAnswer`] passed to the callback.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fastosc_answer_set_port(
-    answer: *mut OscAnswer,
-    port: c_ushort,
-) -> ApiResult {
+pub unsafe extern "C" fn hi_answer_set_port(answer: *mut OscAnswer, port: c_ushort) -> ApiResult {
     if !answer.is_null() {
         unsafe {
             Box::from_raw(answer).set_port(port);
@@ -158,7 +151,7 @@ pub unsafe extern "C" fn fastosc_answer_set_port(
 /// # Safety
 /// `answer` must be a valid [`OscAnswer`] passed to the callback.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fastosc_answer_mark_send(
+pub unsafe extern "C" fn hi_answer_mark_send(
     answer: *mut OscAnswer,
     will_be_sent: bool,
 ) -> ApiResult {
@@ -190,19 +183,19 @@ pub unsafe extern "C" fn fastosc_answer_mark_send(
 /// - len as `int_32`: Length of the osc_arguments list
 /// - user_data as `void *`: `user_data_from_c` will be passed to this
 /// - osc_answer as `OscAnswer*`: An OSC answer prepopulated with the osc address and return ip
-///   address. Can be modified by the `fastosc_answer` functions
+///   address. Can be modified by the `hi_answer` functions
 ///
 /// # Safety
 ///
 /// The function pointer `callback` is called from another thread (started by
-/// [`fastosc_start_thread`], so make sure that everything you do in the callback is
+/// [`hi_start_thread`], so make sure that everything you do in the callback is
 /// thread-safe.
 /// Also make sure that the data in `user_data_from_c` is accessed in a thread-safe way
 /// for the same reason.
 /// All arguments are only valid during the execution of the callback, with the exeption of
 /// `user_data_from_c`, where the lifetime is controlled by the caller of this function.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fastosc_register_handler(
+pub unsafe extern "C" fn hi_register_handler(
     server: *mut OscServer,
     path: *const c_char,
     types: *const c_char,
@@ -280,10 +273,10 @@ pub unsafe extern "C" fn fastosc_register_handler(
     ApiResult::InvalidArgument
 }
 
-/// Spawn a new thread and listen to the address specified in [`fastosc_server_new`].
-/// The thread can be stopped again using [`fastosc_stop_thread`].
+/// Spawn a new thread and listen to the address specified in [`hi_server_new`].
+/// The thread can be stopped again using [`hi_stop_thread`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fastosc_start_thread(server: *mut OscServer) -> ApiResult {
+pub unsafe extern "C" fn hi_start_thread(server: *mut OscServer) -> ApiResult {
     unsafe {
         match server.as_mut() {
             Some(server) => {
@@ -298,7 +291,7 @@ pub unsafe extern "C" fn fastosc_start_thread(server: *mut OscServer) -> ApiResu
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fastosc_register_error_handler(
+pub unsafe extern "C" fn hi_register_error_handler(
     server: *mut OscServer,
     callback: extern "C" fn(*const c_char),
 ) -> ApiResult {
@@ -321,11 +314,11 @@ pub unsafe extern "C" fn fastosc_register_error_handler(
     }
 }
 
-/// Stop the server thread started by [`fastosc_start_thread`] safely. The message that is
+/// Stop the server thread started by [`hi_start_thread`] safely. The message that is
 /// currently processing will be finished, after that the thread exits. A stopped thread can be
 /// started again.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fastosc_stop_thread(server: *mut OscServer) -> ApiResult {
+pub unsafe extern "C" fn hi_stop_thread(server: *mut OscServer) -> ApiResult {
     unsafe {
         match server.as_mut() {
             Some(server) => {
@@ -340,9 +333,7 @@ pub unsafe extern "C" fn fastosc_stop_thread(server: *mut OscServer) -> ApiResul
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fastosc_get_ip_of_socket_addr(
-    sock_addr: *const SocketAddr,
-) -> *const char {
+pub unsafe extern "C" fn hi_get_ip_of_socket_addr(sock_addr: *const SocketAddr) -> *const char {
     unsafe {
         match sock_addr.as_ref() {
             Some(sock_addr) => {
@@ -354,7 +345,7 @@ pub unsafe extern "C" fn fastosc_get_ip_of_socket_addr(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fastosc_free_ip_of_socket_addr(addr_part: *mut char) {
+pub unsafe extern "C" fn hi_free_ip_of_socket_addr(addr_part: *mut char) {
     unsafe {
         if addr_part.is_null() {
             return;
@@ -365,7 +356,7 @@ pub unsafe extern "C" fn fastosc_free_ip_of_socket_addr(addr_part: *mut char) {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fastosc_get_port_of_socket_addr(sock_addr: *const SocketAddr) -> u16 {
+pub unsafe extern "C" fn hi_get_port_of_socket_addr(sock_addr: *const SocketAddr) -> u16 {
     unsafe {
         match sock_addr.as_ref() {
             Some(sock_addr) => sock_addr.port(),
@@ -375,7 +366,7 @@ pub unsafe extern "C" fn fastosc_get_port_of_socket_addr(sock_addr: *const Socke
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fastosc_set_port_of_socket_addr(
+pub unsafe extern "C" fn hi_set_port_of_socket_addr(
     sock_addr: *mut SocketAddr,
     port: u16,
 ) -> ApiResult {

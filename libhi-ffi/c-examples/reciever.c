@@ -33,7 +33,7 @@ void increment_counter_callback(const char *address, const char *types,
 int main(void) {
 
   // Create new server listening at 127.0.0.1 at port 50000 UDP
-  struct OscServer *serv = fastosc_server_new("127.0.0.1:50000");
+  struct OscServer *serv = hi_server_new("127.0.0.1:50000");
   if (serv == NULL) {
     printf("Creating server failed\n");
     return 1;
@@ -41,12 +41,12 @@ int main(void) {
   printf("Creating server succeeded, got ptr 0x%x\n", serv);
 
   // Register a handler at address "/test"
-  enum ApiResult res = fastosc_register_handler(
+  enum ApiResult res = hi_register_handler(
       serv, "/counter_inc", "", increment_counter_callback, &counter);
   printf("Registered handler, API result: %d\n", res);
 
   // Start the thread handling OSC messages
-  fastosc_start_thread(serv);
+  hi_start_thread(serv);
 
   // Never exit, because the osc thread would also die
   while (true) {
