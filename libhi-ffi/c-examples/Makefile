@@ -5,7 +5,7 @@ EXAMPLES = reciever simple_reciever reciever_with_data
 
 all: $(EXAMPLES)
 
-$(EXAMPLES): %: %.c ../../target/debug/liblibhiffi.so
+$(EXAMPLES): %: %.c ../../target/debug/libhiffi.so
 
 ../../target/debug/liblibhiffi.so:
 	cd .. && cargo build
