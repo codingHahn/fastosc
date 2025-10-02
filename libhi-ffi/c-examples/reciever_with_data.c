@@ -17,8 +17,8 @@ float save_float = 0.0;
 // The callback gets passed `user_data` as the last argument. It is of type
 // `void *`, so it needs to be cast into the right type again for access.
 void save_int_callback(const char *address, const char *types,
-                       const SocketAddr *socket, const void *const *args,
-                       int32_t len, const void *user_data, OscAnswer *answer) {
+                       const void *const *args, int32_t len, OscAnswer *answer,
+                       const void *user_data) {
   printf("Got message for address %s, with type len %d types %s types\n",
          address, len, types);
 
@@ -27,9 +27,8 @@ void save_int_callback(const char *address, const char *types,
 }
 
 void save_float_callback(const char *address, const char *types,
-                         const SocketAddr *socket, const void *const *args,
-                         int32_t len, const void *user_data,
-                         OscAnswer *answer) {
+                         const void *const *args, int32_t len,
+                         OscAnswer *answer, const void *user_data) {
   printf("Got message for address %s, with type len %d types %s types\n",
          address, len, types);
 

@@ -1,7 +1,7 @@
 use rosc::OscType;
 use rosc::address::OscAddress;
 use std::env;
-use std::net::{SocketAddr, SocketAddrV4};
+use std::net::SocketAddrV4;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -29,11 +29,8 @@ fn main() {
             Box::new(
                 |path: &OscAddress,
                  args: &Vec<OscType>,
-                 _from_addr: &SocketAddr,
-                 _user_data: Option<_>,
-                 _answer: &mut OscAnswer| {
-                    println!("Hi, {0}, {1:#?}", path, args)
-                },
+                 _answer: &mut OscAnswer,
+                 _user_data: Option<_>| { println!("Hi, {0}, {1:#?}", path, args) },
             ),
             None,
         )
@@ -45,11 +42,8 @@ fn main() {
             Box::new(
                 |path: &OscAddress,
                  args: &Vec<OscType>,
-                 _from_addr: &SocketAddr,
-                 _user_data: Option<_>,
-                 _answer: &mut OscAnswer| {
-                    println!("Hi, {0}, {1:#?}", path, args)
-                },
+                 _answer: &mut OscAnswer,
+                 _user_data: Option<_>| { println!("Hi, {0}, {1:#?}", path, args) },
             ),
             None,
         )
@@ -61,9 +55,8 @@ fn main() {
             Box::new(
                 |_path: &OscAddress,
                  args: &Vec<OscType>,
-                 _from_addr: &SocketAddr,
-                 _user_data: Option<_>,
-                 answer: &mut OscAnswer| {
+                 answer: &mut OscAnswer,
+                 _user_data: Option<_>| {
                     answer.replace_arguments(args.to_vec());
                     answer.set_port(50010);
                     answer.mark_send(true);

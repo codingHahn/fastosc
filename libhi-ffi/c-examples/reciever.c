@@ -16,9 +16,8 @@ int counter = 0;
 // The callback gets passed `user_data` as the last argument. It is of type
 // `void *`, so it needs to be cast into the right type again for access.
 void increment_counter_callback(const char *address, const char *types,
-                                const SocketAddr *socket,
                                 const void *const *args, int32_t len,
-                                const void *user_data, OscAnswer *answer) {
+                                OscAnswer *answer, const void *user_data) {
   printf("Got message for address %s, with type len %d types %s types\n",
          address, len, types);
 

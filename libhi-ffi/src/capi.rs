@@ -178,12 +178,11 @@ pub unsafe extern "C" fn hi_answer_mark_send(
 /// - osc_address as `const char*`: The address the handler got called for
 /// - osc_types as `const char*`: A string of the recieved arguments in the OSC message, starting
 ///   with `,`
-/// - socket_addr as `const SocketAddr*`: A struct holding source IP and port of the osc message
 /// - osc_arguments as `const void**`: A list of arguments in the message with length `len`
 /// - len as `int_32`: Length of the osc_arguments list
-/// - user_data as `void *`: `user_data_from_c` will be passed to this
 /// - osc_answer as `OscAnswer*`: An OSC answer prepopulated with the osc address and return ip
 ///   address. Can be modified by the `hi_answer` functions
+/// - user_data as `void *`: `user_data_from_c` will be passed to this
 ///
 /// # Safety
 ///
@@ -202,11 +201,10 @@ pub unsafe extern "C" fn hi_register_handler(
     callback: extern "C" fn(
         *const c_char,
         *const c_char,
-        *const SocketAddr,
         *const *const c_void,
         i32,
-        *const c_void,
         *mut OscAnswer,
+        *const c_void,
     ),
     user_data_from_c: *const c_void,
 ) -> ApiResult {
@@ -214,41 +212,40 @@ pub unsafe extern "C" fn hi_register_handler(
     if let Ok(safe_path) = { unsafe { std::ffi::CStr::from_ptr(path).to_str() } }
         && let Ok(safe_types) = { unsafe { std::ffi::CStr::from_ptr(types).to_str() } }
     {
-        let callback_translator = move |_osc_addr: &OscAddress,
-                                        osc_args: &Vec<OscType>,
-                                        from_addr: &SocketAddr,
-                                        user_data: Option<Arc<Mutex<Box<dyn Any + Send>>>>,
-                                        answer: &mut OscAnswer| {
-            let mut type_str = vec![];
-            for t in osc_args {
-                type_str.push(osc_type_to_char(t));
-            }
-            let cs = CString::new(type_str.iter().collect::<String>()).unwrap();
-            let type_str_c = SendCharPtr(cs.as_ptr());
-            let user_data_c: SendVoidPtr = match user_data.clone() {
-                Some(data) => *data.lock().unwrap().downcast_ref::<SendVoidPtr>().unwrap(),
-                None => SendVoidPtr(ptr::null()),
-            };
-            let c_args: Vec<*const c_void> = osc_args.iter().map(osctype_to_void_ptr).collect();
-            (callback)(
-                wrapped_path.get_ptr(),
-                type_str_c.get_ptr(),
-                from_addr as *const SocketAddr,
-                c_args.as_ptr(),
-                c_args.len() as i32,
-                user_data_c.get_ptr(),
-                answer as *mut OscAnswer,
-            );
-            // Prevent memory leak by owning all strings from c_args again.
-            // They were allocated by CString::into_raw which leaks without ::from_raw
-            for (c, arg) in std::iter::zip(type_str, c_args) {
-                if c == 's' {
-                    unsafe {
-                        let _ = CString::from_raw(arg as *mut c_char);
+        let callback_translator =
+            move |_osc_addr: &OscAddress,
+                  osc_args: &Vec<OscType>,
+                  answer: &mut OscAnswer,
+                  user_data: Option<Arc<Mutex<Box<dyn Any + Send>>>>| {
+                let mut type_str = vec![];
+                for t in osc_args {
+                    type_str.push(osc_type_to_char(t));
+                }
+                let cs = CString::new(type_str.iter().collect::<String>()).unwrap();
+                let type_str_c = SendCharPtr(cs.as_ptr());
+                let user_data_c: SendVoidPtr = match user_data.clone() {
+                    Some(data) => *data.lock().unwrap().downcast_ref::<SendVoidPtr>().unwrap(),
+                    None => SendVoidPtr(ptr::null()),
+                };
+                let c_args: Vec<*const c_void> = osc_args.iter().map(osctype_to_void_ptr).collect();
+                (callback)(
+                    wrapped_path.get_ptr(),
+                    type_str_c.get_ptr(),
+                    c_args.as_ptr(),
+                    c_args.len() as i32,
+                    answer as *mut OscAnswer,
+                    user_data_c.get_ptr(),
+                );
+                // Prevent memory leak by owning all strings from c_args again.
+                // They were allocated by CString::into_raw which leaks without ::from_raw
+                for (c, arg) in std::iter::zip(type_str, c_args) {
+                    if c == 's' {
+                        unsafe {
+                            let _ = CString::from_raw(arg as *mut c_char);
+                        }
                     }
                 }
-            }
-        };
+            };
         unsafe {
             match server.as_mut() {
                 Some(server) => {

@@ -28,13 +28,8 @@ type AddressToCallbackMap = HashMap<OscAddress, CallbackWithUserdata>;
 
 struct CallbackWithUserdata {
     callback: Box<
-        dyn Fn(
-                &OscAddress,
-                &Vec<OscType>,
-                &SocketAddr,
-                Option<Arc<Mutex<Box<dyn Any + Send>>>>,
-                &mut OscAnswer,
-            ) + Send
+        dyn Fn(&OscAddress, &Vec<OscType>, &mut OscAnswer, Option<Arc<Mutex<Box<dyn Any + Send>>>>)
+            + Send
             + 'static,
     >,
     types: Vec<char>,
@@ -68,9 +63,8 @@ impl OscServerInternal {
         callback: impl Fn(
             &OscAddress,
             &Vec<OscType>,
-            &SocketAddr,
-            Option<Arc<Mutex<Box<dyn Any + Send>>>>,
             &mut OscAnswer,
+            Option<Arc<Mutex<Box<dyn Any + Send>>>>,
         )
         + 'static
         + Send,
@@ -126,9 +120,8 @@ impl OscServerInternal {
         (callback.callback)(
             osc_address,
             &coerced_arguments,
-            &from_addr,
-            callback.user_data.clone(),
             &mut answer,
+            callback.user_data.clone(),
         );
         if answer.will_be_sent {
             self.send_packet(OscPacket::Message(answer.msg), answer.to_addr)?;
@@ -206,9 +199,8 @@ impl OscServer {
         callback: impl Fn(
             &OscAddress,
             &Vec<OscType>,
-            &SocketAddr,
-            Option<Arc<Mutex<Box<dyn Any + Send>>>>,
             &mut OscAnswer,
+            Option<Arc<Mutex<Box<dyn Any + Send>>>>,
         )
         + 'static
         + Send,
