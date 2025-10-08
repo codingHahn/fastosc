@@ -379,6 +379,34 @@ pub unsafe extern "C" fn hi_set_port_of_socket_addr(
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn hi_version(
+    verstr: *mut c_char,
+    verstr_size: c_uint,
+    major: *mut c_int,
+    minor: *mut c_int,
+    patch: *mut c_int,
+) {
+    let (version_str, major_ver, minor_ver, patch_ver) = library_version();
+
+    unsafe {
+        if !verstr.is_null() && version_str.len() < verstr_size as usize {
+            let str_src = CString::new(version_str).unwrap_or_default();
+            let len = std::cmp::min(str_src.as_bytes_with_nul().len(), verstr_size as usize);
+            std::ptr::copy_nonoverlapping(str_src.as_ptr(), verstr, len);
+        }
+        if let Some(c_major) = major.as_mut() {
+            *c_major = major_ver
+        }
+        if let Some(c_minor) = minor.as_mut() {
+            *c_minor = minor_ver
+        }
+        if let Some(c_patch) = patch.as_mut() {
+            *c_patch = patch_ver
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 fn osctype_to_void_ptr(t: &OscType) -> *const c_void {
     match t {
         OscType::Int(i) => i as *const ffi::c_int as *const c_void,

@@ -462,3 +462,14 @@ pub fn coerce_arguments(src_list: &[OscType], types: &[char]) -> Vec<OscType> {
     }
     coerced_arguments
 }
+
+pub fn library_version() -> (&'static str, i32, i32, i32) {
+    let version_str = env!("CARGO_PKG_VERSION");
+    let mut vers = version_str.split(".");
+    (
+        version_str,
+        vers.next().unwrap_or("0").parse().unwrap_or(0),
+        vers.next().unwrap_or("0").parse().unwrap_or(0),
+        vers.next().unwrap_or("0").parse().unwrap_or(0),
+    )
+}
