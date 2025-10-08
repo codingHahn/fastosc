@@ -22,9 +22,9 @@ impl SendCharPtr {
 }
 unsafe impl Send for SendCharPtr {}
 
-struct SendVoidPtr(*const c_void);
+struct SendVoidPtr(*mut c_void);
 impl SendVoidPtr {
-    pub fn get_ptr(&self) -> *const c_void {
+    pub fn get_mut_ptr(&self) -> *mut c_void {
         self.0
     }
 }
@@ -204,9 +204,9 @@ pub unsafe extern "C" fn hi_register_handler(
         *const *const c_void,
         i32,
         *mut OscAnswer,
-        *const c_void,
+        *mut c_void,
     ),
-    user_data_from_c: *const c_void,
+    user_data_from_c: *mut c_void,
 ) -> ApiResult {
     let wrapped_path = SendCharPtr(path);
     if let Ok(safe_path) = { unsafe { std::ffi::CStr::from_ptr(path).to_str() } }
@@ -225,7 +225,7 @@ pub unsafe extern "C" fn hi_register_handler(
                 let type_str_c = SendCharPtr(cs.as_ptr());
                 let user_data_c: SendVoidPtr = match user_data.clone() {
                     Some(data) => *data.lock().unwrap().downcast_ref::<SendVoidPtr>().unwrap(),
-                    None => SendVoidPtr(ptr::null()),
+                    None => SendVoidPtr(ptr::null_mut()),
                 };
                 let c_args: Vec<*const c_void> = osc_args.iter().map(osctype_to_void_ptr).collect();
                 (callback)(
@@ -234,7 +234,7 @@ pub unsafe extern "C" fn hi_register_handler(
                     c_args.as_ptr(),
                     c_args.len() as i32,
                     answer as *mut OscAnswer,
-                    user_data_c.get_ptr(),
+                    user_data_c.get_mut_ptr(),
                 );
                 // Prevent memory leak by owning all strings from c_args again.
                 // They were allocated by CString::into_raw which leaks without ::from_raw
@@ -249,7 +249,7 @@ pub unsafe extern "C" fn hi_register_handler(
         unsafe {
             match server.as_mut() {
                 Some(server) => {
-                    let user_data = user_data_from_c.as_ref().map(|user_data| {
+                    let user_data = user_data_from_c.as_mut().map(|user_data| {
                         Arc::new(Mutex::new(
                             Box::new(SendVoidPtr(user_data)) as Box<dyn std::any::Any + Send>
                         ))

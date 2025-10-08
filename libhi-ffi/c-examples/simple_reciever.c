@@ -5,7 +5,7 @@
 
 void generic_callback(const char *address, const char *types,
                       const void *const *args, int32_t len, OscAnswer *answer,
-                      const void *user_data) {
+                      void *user_data) {
   printf("Got message for address %s, with type len %d types %s types\n",
          address, len, types);
 }
