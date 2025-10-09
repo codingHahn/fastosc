@@ -221,7 +221,15 @@ pub unsafe extern "C" fn hi_register_handler(
 ) -> ApiResult {
     let wrapped_path = SendCharPtr(path);
     if let Ok(safe_path) = { unsafe { std::ffi::CStr::from_ptr(path).to_str() } }
-        && let Ok(safe_types) = { unsafe { std::ffi::CStr::from_ptr(types).to_str() } }
+        && let Ok(safe_types) = {
+            unsafe {
+                if types.is_null() {
+                    Ok("")
+                } else {
+                    core::ffi::CStr::from_ptr(types).to_str()
+                }
+            }
+        }
     {
         let callback_translator =
             move |_osc_addr: &OscAddress,
