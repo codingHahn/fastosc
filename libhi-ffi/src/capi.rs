@@ -88,12 +88,15 @@ pub unsafe extern "C" fn hi_server_free(server: *mut OscServer) {
 /// `answer` must be a valid [`OscAnswer`] passed to the callback.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hi_answer_add_int(answer: *mut OscAnswer, arg: c_int) -> ApiResult {
-    if !answer.is_null() {
-        unsafe { Box::from_raw(answer).add_argument(OscType::Int(arg)) };
-        return ApiResult::Success;
-    };
-
-    ApiResult::NullHandleError
+    unsafe {
+        match answer.as_mut() {
+            Some(ans) => {
+                ans.add_argument(OscType::Int(arg));
+                ApiResult::Success
+            }
+            None => ApiResult::NullHandleError,
+        }
+    }
 }
 
 /// Add a float response to the [`OscAnswer`].
@@ -102,12 +105,15 @@ pub unsafe extern "C" fn hi_answer_add_int(answer: *mut OscAnswer, arg: c_int) -
 /// `answer` must be a valid [`OscAnswer`] passed to the callback.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hi_answer_add_float(answer: *mut OscAnswer, arg: c_float) -> ApiResult {
-    if !answer.is_null() {
-        unsafe { Box::from_raw(answer).add_argument(OscType::Float(arg)) };
-        return ApiResult::Success;
-    };
-
-    ApiResult::NullHandleError
+    unsafe {
+        match answer.as_mut() {
+            Some(ans) => {
+                ans.add_argument(OscType::Float(arg));
+                ApiResult::Success
+            }
+            None => ApiResult::NullHandleError,
+        }
+    }
 }
 
 /// Add a string response to the [`OscAnswer`].
@@ -120,14 +126,17 @@ pub unsafe extern "C" fn hi_answer_add_string(
     answer: *mut OscAnswer,
     arg: *const c_char,
 ) -> ApiResult {
-    if !answer.is_null() {
-        let cstring = unsafe { CStr::from_ptr(arg.cast_mut()) };
-        let safe_arg = cstring.to_str().unwrap_or("").to_owned();
-        unsafe { Box::from_raw(answer).add_argument(OscType::String(safe_arg)) };
-        return ApiResult::Success;
-    };
-
-    ApiResult::NullHandleError
+    unsafe {
+        match answer.as_mut() {
+            Some(ans) => {
+                let cstring = CStr::from_ptr(arg.cast_mut());
+                let safe_arg = cstring.to_str().unwrap_or("").to_owned();
+                ans.add_argument(OscType::String(safe_arg));
+                ApiResult::Success
+            }
+            None => ApiResult::NullHandleError,
+        }
+    }
 }
 
 /// Set the port the [`OscAnswer`] is sent back to.
@@ -136,14 +145,15 @@ pub unsafe extern "C" fn hi_answer_add_string(
 /// `answer` must be a valid [`OscAnswer`] passed to the callback.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hi_answer_set_port(answer: *mut OscAnswer, port: c_ushort) -> ApiResult {
-    if !answer.is_null() {
-        unsafe {
-            Box::from_raw(answer).set_port(port);
+    unsafe {
+        match answer.as_mut() {
+            Some(ans) => {
+                ans.set_port(port);
+                ApiResult::Success
+            }
+            None => ApiResult::NullHandleError,
         }
-        return ApiResult::Success;
     }
-
-    ApiResult::NullHandleError
 }
 
 /// Marks an [`OscAnswer`] to be sent after the callback returns.
@@ -155,14 +165,15 @@ pub unsafe extern "C" fn hi_answer_mark_send(
     answer: *mut OscAnswer,
     will_be_sent: bool,
 ) -> ApiResult {
-    if !answer.is_null() {
-        unsafe {
-            Box::from_raw(answer).mark_send(will_be_sent);
-        };
-        return ApiResult::Success;
-    };
-
-    ApiResult::NullHandleError
+    unsafe {
+        match answer.as_mut() {
+            Some(ans) => {
+                ans.mark_send(will_be_sent);
+                ApiResult::Success
+            }
+            None => ApiResult::NullHandleError,
+        }
+    }
 }
 
 /// Register a handler that responds to the address specified in the argument `path`.
