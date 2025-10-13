@@ -108,6 +108,13 @@ impl OscServerInternal {
         args: &[OscType],
         from_addr: SocketAddr,
     ) -> Result<(), FastOscError> {
+        // The number of recieved arguments has to match the expected number of arguments,
+        // otherwise the packet is discarded and this function returns early.
+        // The exception is a packet with zero arguments, which is permitted because it is a get
+        // request.
+        if args.len() != callback.types.len() && !args.is_empty() {
+            return Ok(());
+        }
         let coerced_arguments = coerce_arguments(args, &callback.types);
         let mut answer = OscAnswer {
             msg: rosc::OscMessage {
@@ -448,16 +455,17 @@ pub fn osctype_coerce(from: &OscType, to: &OscType) -> OscType {
 
 pub fn coerce_arguments(src_list: &[OscType], types: &[char]) -> Vec<OscType> {
     let mut coerced_arguments = vec![];
-    if src_list.len() == types.len() {
-        for i in 0..src_list.len() {
-            let temp_destination_type = char_to_osc_type(types[i]);
-            if osc_type_to_char(&src_list[i]) == types[i] {
-                coerced_arguments.push(src_list[i].clone());
-            } else if osctype_is_coercible(&src_list[i], &temp_destination_type) {
-                coerced_arguments.push(osctype_coerce(&src_list[i], &temp_destination_type));
-            } else {
-                println!("Unsupported argument found: TODO , expected {temp_destination_type}");
-            }
+
+    // Make sure that we don't go out of bounds by taking the smaller of the two lengths
+    let min_len = std::cmp::min(src_list.len(), types.len());
+    for i in 0..min_len {
+        let temp_destination_type = char_to_osc_type(types[i]);
+        if osc_type_to_char(&src_list[i]) == types[i] {
+            coerced_arguments.push(src_list[i].clone());
+        } else if osctype_is_coercible(&src_list[i], &temp_destination_type) {
+            coerced_arguments.push(osctype_coerce(&src_list[i], &temp_destination_type));
+        } else {
+            println!("Unsupported argument found: TODO , expected {temp_destination_type}");
         }
     }
     coerced_arguments
