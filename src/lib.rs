@@ -86,7 +86,6 @@ impl OscServerInternal {
         let mut buf = [0u8; rosc::decoder::MTU];
         match self.sock.recv_from(&mut buf) {
             Ok((size, addr)) => {
-                println!("Received packet with size {} from: {}", size, addr);
                 let (_, packet) =
                     rosc::decoder::decode_udp(&buf[..size]).map_err(FastOscError::OscError)?;
                 self.handle_packet(packet, addr)?;
@@ -154,9 +153,7 @@ impl OscServerInternal {
                             self.handle_message(handler, addr, &msg.args, from_addr)?;
                         }
                     }
-                    return Ok(());
                 }
-                println!("No handler for path: {0}", msg.addr);
             }
 
             OscPacket::Bundle(bundle) => {
