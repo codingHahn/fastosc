@@ -8,6 +8,7 @@ use std::mem::discriminant;
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 pub use rosc;
 
@@ -15,6 +16,7 @@ pub use rosc;
 pub enum FastOscError {
     ReadError(std::io::Error),
     SendError(std::io::Error),
+    SocketError(std::io::Error),
     OscError(OscError),
     MutexFail,
     RegisterHandlerError,
@@ -82,22 +84,17 @@ impl OscServerInternal {
         self.error_handler = Some(Box::new(callback));
     }
 
-    fn recv(&self) -> Result<(), FastOscError> {
-        let mut buf = [0u8; rosc::decoder::MTU];
-        match self.sock.recv_from(&mut buf) {
-            Ok((size, addr)) => {
-                let (_, packet) =
-                    rosc::decoder::decode_udp(&buf[..size]).map_err(FastOscError::OscError)?;
-                self.handle_packet(packet, addr)?;
-                Ok(())
-            }
-            Err(e) => {
-                println!("Error receiving from socket: {}", e);
-                Err(e).map_err(|_| {
-                    FastOscError::OscError(OscError::BadPacket("Error recieving from socket"))
-                })
-            }
-        }
+    fn recv_from(&self, buf: &[u8], size: usize, addr: SocketAddr) -> Result<(), FastOscError> {
+        let (_, packet) =
+            rosc::decoder::decode_udp(&buf[..size]).map_err(FastOscError::OscError)?;
+        self.handle_packet(packet, addr)?;
+        Ok(())
+    }
+
+    fn copy_socket(&self) -> Result<UdpSocket, FastOscError> {
+        self.sock
+            .try_clone()
+            .map_err(|e| FastOscError::SocketError(e))
     }
 
     fn handle_message(
@@ -233,11 +230,19 @@ impl OscServer {
         Ok(())
     }
 
-    pub fn recv(&self) -> Result<(), FastOscError> {
+    pub fn recv_from(&self, buf: &[u8], size: usize, addr: SocketAddr) -> Result<(), FastOscError> {
         self.internal
             .lock()
             .map_err(|_| FastOscError::MutexFail)?
-            .recv()
+            .recv_from(buf, size, addr)
+    }
+
+    /// Clones the socket to use the socket in another thread without locking the mutex
+    fn copy_socket(&self) -> Result<UdpSocket, FastOscError> {
+        self.internal
+            .lock()
+            .map_err(|_| FastOscError::MutexFail)?
+            .copy_socket()
     }
 
     pub fn handle_packet(
@@ -265,24 +270,50 @@ impl OscServer {
     ///
     /// It is possible to stop the thread using [`OscServer::stop_thread`].
     pub fn start_thread(&mut self) -> Result<(), FastOscError> {
+        // Make copy of self for server thread
         let serv = self.clone();
+        let sock = self.copy_socket()?;
+
+        // Make sock.recv block only for 25 ms at a time. Otherwise we would block shutting down
+        // the task until we recieve another packet.
+        sock.set_read_timeout(Some(Duration::from_millis(25)))
+            .map_err(|e| FastOscError::SocketError(e))?;
+
+        // Event loop. Reading the UDP socket blocks for 25 ms, then checks if the thread
+        // should shutdown
         let server_handle = std::thread::spawn(move || {
-            // Event loop. Blocks in [`OscServerInternal::recv()`] until new packet arrives. When
-            // that function errors, it gets handled here.
+            let mut udp_buf = [0u8; rosc::decoder::MTU];
             loop {
-                if let Err(err) = serv.recv()
-                    && let Ok(lock) = serv.internal.lock()
-                {
-                    if lock.stop {
-                        break;
+                match sock.recv_from(&mut udp_buf) {
+                    Ok((size, addr)) => {
+                        if let Err(err) = serv.recv_from(&udp_buf, size, addr) {
+                            if let Ok(lock) = serv.internal.lock() {
+                                if lock.stop {
+                                    break;
+                                }
+                                if let Some(handler) = &lock.error_handler {
+                                    let error_str = format!("FastOscError: {err:#?}");
+                                    (handler)(&error_str);
+                                }
+                            }
+                            // Explicitly do nothing if no error handler is registered.
+                            // TODO: Maybe register a dummy handler, which dumps to
+                            // stdout/stderror?
+                        }
                     }
-                    if let Some(handler) = &lock.error_handler {
-                        let error_str = format!("FastOscError: {err:#?}");
-                        (handler)(&error_str);
+                    Err(e) => {
+                        // WouldBlock is returned when the timeout is reached
+                        if e.kind() != std::io::ErrorKind::WouldBlock {
+                            // TODO: Logging
+                        }
+                        // Check if `stop_server_thread` was called (this sets lock.stop to true)
+                        // and break out of the loop
+                        if let Ok(lock) = serv.internal.lock() {
+                            if lock.stop {
+                                break;
+                            }
+                        }
                     }
-                    // Explicitly do nothing if no error handler is registered.
-                    // TODO: Maybe register a dummy handler, which dumps to
-                    // stdout/stderror?
                 }
             }
         });
@@ -303,10 +334,22 @@ impl OscServer {
             .map_err(|_| FastOscError::RegisterHandlerError)?;
 
         lock.stop = true;
+
+        let handle = lock.thread_handle.take();
+        // This explicit drop is very important
+        // It releases the lock that allows the server thread to read the value of the `lock.stop`
+        // variable. Otherwise it would block indefinitly, because this function still has the lock
+        drop(lock);
+
         let mut ret = Ok(());
-        if let Some(th) = lock.thread_handle.take() {
+        if let Some(th) = handle {
             ret = th.join().map_err(|_| FastOscError::ThreadPanic);
         };
+
+        let mut lock = self
+            .internal
+            .lock()
+            .map_err(|_| FastOscError::RegisterHandlerError)?;
 
         // Reset the stop condition variable to allow starting the thread again
         lock.stop = false;
