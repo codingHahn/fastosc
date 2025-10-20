@@ -2,6 +2,7 @@
 name = "libhi"
 version = "0.3.0"
 edition = "2024"
+license = "LGPL-2.1-or-later"
 
 [workspace]
 members = [ "libhi-ffi" ]
