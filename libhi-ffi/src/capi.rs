@@ -156,6 +156,32 @@ pub unsafe extern "C" fn hi_answer_set_port(answer: *mut OscAnswer, port: c_usho
     }
 }
 
+/// Set the osc path of [`OscAnswer`].
+///
+/// # Safety
+/// `answer` must be a valid [`OscAnswer`] passed to the callback.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hi_answer_set_osc_address(
+    answer: *mut OscAnswer,
+    osc_address: *const c_char,
+) -> ApiResult {
+    if osc_address.is_null() {
+        return ApiResult::NullHandleError;
+    }
+    let cstring = unsafe { CStr::from_ptr(osc_address.cast_mut()) };
+    let safe_addr = cstring.to_str().unwrap_or("").to_owned();
+
+    unsafe {
+        match answer.as_mut() {
+            Some(ans) => {
+                ans.set_osc_address(&safe_addr);
+                ApiResult::Success
+            }
+            None => ApiResult::NullHandleError,
+        }
+    }
+}
+
 /// Marks an [`OscAnswer`] to be sent after the callback returns.
 ///
 /// # Safety

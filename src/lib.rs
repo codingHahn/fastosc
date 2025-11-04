@@ -386,6 +386,10 @@ impl OscAnswer {
         self.to_addr.set_port(port);
     }
 
+    pub fn set_osc_address(&mut self, path: &str) {
+        self.msg.addr = path.to_string();
+    }
+
     /// Replace all arguments of the answer
     pub fn replace_arguments(&mut self, args: Vec<OscType>) {
         self.msg.args = args;
