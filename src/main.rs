@@ -66,6 +66,49 @@ fn main() {
             None,
         )
         .unwrap();
+
+    server
+        .register_handler_where_less_args_are_ok(
+            "/less_args_ok",
+            "iii",
+            Box::new(
+                |_path: &OscAddress,
+                 args: &Vec<OscType>,
+                 answer: &mut OscAnswer,
+                 _user_data: Option<_>| {
+                    answer.replace_arguments(args.to_vec());
+                    answer.set_port(50010);
+                    answer.mark_send(true);
+                    println!("Hi from less_args_ok");
+                    for i in 0..args.len() {
+                        println!("{}", args[i]);
+                    }
+                },
+            ),
+            None,
+        )
+        .unwrap();
+    server
+        .register_handler(
+            "/three_args",
+            "iii",
+            Box::new(
+                |_path: &OscAddress,
+                 args: &Vec<OscType>,
+                 answer: &mut OscAnswer,
+                 _user_data: Option<_>| {
+                    answer.replace_arguments(args.to_vec());
+                    answer.set_port(50010);
+                    answer.mark_send(true);
+                    println!("Hi from three_args");
+                    for i in 0..args.len() {
+                        println!("{}", args[i]);
+                    }
+                },
+            ),
+            None,
+        )
+        .unwrap();
     loop {
         std::thread::sleep(Duration::from_secs(1))
     }

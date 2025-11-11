@@ -1,7 +1,7 @@
 CFLAGS = -O1 -g3 -I ../../target/include
 LDLIBS = -ldl -lm
 
-EXAMPLES = reciever simple_reciever reciever_with_data
+EXAMPLES = reciever simple_reciever vararg_reciever reciever_with_data
 
 all: $(EXAMPLES)
 

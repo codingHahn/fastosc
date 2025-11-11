@@ -36,6 +36,7 @@ struct CallbackWithUserdata {
     >,
     types: Vec<char>,
     user_data: Option<Arc<Mutex<Box<dyn Any + Send>>>>,
+    are_less_arguments_ok: bool,
 }
 /// Internal, non threadsafe OscServer. It gets wrapped in `Arc` and `Mutex` in
 /// `OscServer`
@@ -62,6 +63,7 @@ impl OscServerInternal {
         &mut self,
         path: &OscAddress,
         types: &str,
+        are_less_arguments_ok: bool,
         callback: impl Fn(
             &OscAddress,
             &Vec<OscType>,
@@ -76,6 +78,7 @@ impl OscServerInternal {
             callback: Box::new(callback),
             types: types.chars().collect(),
             user_data,
+            are_less_arguments_ok,
         };
         self.message_handlers.insert(path.to_owned(), callback_data);
     }
@@ -104,14 +107,31 @@ impl OscServerInternal {
         args: &[OscType],
         from_addr: SocketAddr,
     ) -> Result<(), FastOscError> {
-        // The number of recieved arguments has to match the expected number of arguments,
-        // otherwise the packet is discarded and this function returns early.
-        // The exception is a packet with zero arguments, which is permitted because it is a get
-        // request.
-        if args.len() != callback.types.len() && !args.is_empty() {
-            return Ok(());
-        }
+        // Coerce arguments, then check if numbner of successfully coerced arguments matches the
+        // expected count
         let coerced_arguments = coerce_arguments(args, &callback.types);
+
+        // If less arguments are ok, the callback is responsible to read no more than argc entries
+        // into argv
+        if callback.are_less_arguments_ok {
+            // The number of recieved arguments can be less than the number of expected arguments.
+            // Otherwise return early
+            if args.len() > callback.types.len() {
+                return Ok(());
+            }
+        } else {
+            // The number of recieved arguments has to match the expected number of arguments,
+            // otherwise the packet is discarded and this function returns early.
+            // The exception is a packet with zero arguments, which is permitted because it is a get
+            // request.
+            if (coerced_arguments.len() != callback.types.len()
+                || args.len() != callback.types.len())
+                && !coerced_arguments.is_empty()
+            {
+                return Ok(());
+            }
+        }
+
         let mut answer = OscAnswer {
             msg: rosc::OscMessage {
                 addr: osc_address.to_string(),
@@ -193,6 +213,7 @@ impl OscServer {
     /// without address patterns are supported.
     /// Optionally, arbitrary data `user_data` can be provided, which will be avalable to the
     /// callback closure when it is called.
+    /// Callback only gets called when the right number of osc arguments are recieved
     pub fn register_handler(
         &self,
         path: &str,
@@ -211,7 +232,40 @@ impl OscServer {
             self.internal
                 .lock()
                 .map_err(|_| FastOscError::RegisterHandlerError)?
-                .register_handler(&addr, args, callback, user_data);
+                .register_handler(&addr, args, false, callback, user_data);
+            return Ok(());
+        }
+        Err(FastOscError::RegisterHandlerError)
+    }
+
+    /// Registers a closure `callback` for a given OSC address `path`. Currently, only addresses
+    /// without address patterns are supported.
+    /// Optionally, arbitrary data `user_data` can be provided, which will be avalable to the
+    /// callback closure when it is called.
+    /// Callback is called when zero to number of `args` osc arguments are recieved. The callback
+    /// has to check the number of arguments recieved.
+    ///
+    /// Use this for callbacks which should also work when less than the registered arguments are
+    /// recieved.
+    pub fn register_handler_where_less_args_are_ok(
+        &self,
+        path: &str,
+        args: &str,
+        callback: impl Fn(
+            &OscAddress,
+            &Vec<OscType>,
+            &mut OscAnswer,
+            Option<Arc<Mutex<Box<dyn Any + Send>>>>,
+        )
+        + 'static
+        + Send,
+        user_data: Option<Arc<Mutex<Box<dyn Any + Send>>>>,
+    ) -> Result<(), FastOscError> {
+        if let Ok(addr) = OscAddress::new(path.to_owned()) {
+            self.internal
+                .lock()
+                .map_err(|_| FastOscError::RegisterHandlerError)?
+                .register_handler(&addr, args, true, callback, user_data);
             return Ok(());
         }
         Err(FastOscError::RegisterHandlerError)

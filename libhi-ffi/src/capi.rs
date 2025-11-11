@@ -202,39 +202,11 @@ pub unsafe extern "C" fn hi_answer_mark_send(
     }
 }
 
-/// Register a handler that responds to the address specified in the argument `path`.
-///
-/// `user_data_from_c` can either be `NULL` or an arbitrary pointer to some data that
-/// gets passed to the callback as last argument.
-///
-/// # Callback
-///
-/// The callback is the most advanced argument in this list. It gets the following arguments passed
-/// in that order:
-///
-/// - osc_address as `const char*`: The address the handler got called for
-/// - osc_types as `const char*`: A string of the recieved arguments in the OSC message, starting
-///   with `,`
-/// - osc_arguments as `const void**`: A list of arguments in the message with length `len`
-/// - len as `int_32`: Length of the osc_arguments list
-/// - osc_answer as `OscAnswer*`: An OSC answer prepopulated with the osc address and return ip
-///   address. Can be modified by the `hi_answer` functions
-/// - user_data as `void *`: `user_data_from_c` will be passed to this
-///
-/// # Safety
-///
-/// The function pointer `callback` is called from another thread (started by
-/// [`hi_start_thread`], so make sure that everything you do in the callback is
-/// thread-safe.
-/// Also make sure that the data in `user_data_from_c` is accessed in a thread-safe way
-/// for the same reason.
-/// All arguments are only valid during the execution of the callback, with the exeption of
-/// `user_data_from_c`, where the lifetime is controlled by the caller of this function.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn hi_register_handler(
+unsafe fn internal_register_handler(
     server: *mut OscServer,
     path: *const c_char,
     types: *const c_char,
+    are_less_arguments_ok: bool,
     callback: extern "C" fn(
         *const c_char,
         *const c_char,
@@ -299,9 +271,20 @@ pub unsafe extern "C" fn hi_register_handler(
                             Box::new(SendVoidPtr(user_data)) as Box<dyn std::any::Any + Send>
                         ))
                     });
-                    if server
-                        .register_handler(safe_path, safe_types, callback_translator, user_data)
-                        .is_ok()
+
+                    // Call handler register depending on wether less arguments are ok
+                    let register = match are_less_arguments_ok {
+                        true => OscServer::register_handler_where_less_args_are_ok,
+                        false => OscServer::register_handler,
+                    };
+                    if register(
+                        server,
+                        safe_path,
+                        safe_types,
+                        callback_translator,
+                        user_data,
+                    )
+                    .is_ok()
                     {
                         return ApiResult::Success;
                     } else {
@@ -313,6 +296,76 @@ pub unsafe extern "C" fn hi_register_handler(
         }
     }
     ApiResult::InvalidArgument
+}
+/// Register a handler that responds to the address specified in the argument `path`.
+///
+/// `user_data_from_c` can either be `NULL` or an arbitrary pointer to some data that
+/// gets passed to the callback as last argument.
+///
+/// # Callback
+///
+/// The callback is the most advanced argument in this list. It gets the following arguments passed
+/// in that order:
+///
+/// - osc_address as `const char*`: The address the handler got called for
+/// - osc_types as `const char*`: A string of the recieved arguments in the OSC message, starting
+///   with `,`
+/// - osc_arguments as `const void**`: A list of arguments in the message with length `len`
+/// - len as `int_32`: Length of the osc_arguments list
+/// - osc_answer as `OscAnswer*`: An OSC answer prepopulated with the osc address and return ip
+///   address. Can be modified by the `hi_answer` functions
+/// - user_data as `void *`: `user_data_from_c` will be passed to this
+///
+/// # Safety
+///
+/// The function pointer `callback` is called from another thread (started by
+/// [`hi_start_thread`], so make sure that everything you do in the callback is
+/// thread-safe.
+/// Also make sure that the data in `user_data_from_c` is accessed in a thread-safe way
+/// for the same reason.
+/// All arguments are only valid during the execution of the callback, with the exeption of
+/// `user_data_from_c`, where the lifetime is controlled by the caller of this function.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hi_register_handler(
+    server: *mut OscServer,
+    path: *const c_char,
+    types: *const c_char,
+    callback: extern "C" fn(
+        *const c_char,
+        *const c_char,
+        *const *const c_void,
+        i32,
+        *mut OscAnswer,
+        *mut c_void,
+    ),
+    user_data_from_c: *mut c_void,
+) -> ApiResult {
+    unsafe { internal_register_handler(server, path, types, false, callback, user_data_from_c) }
+}
+
+/// See `hi_register_handler`. The same applies, but the callback is also called when less then the
+/// expected number of arguments arrive. The callback can access the length of the arguments array
+/// as 4th argument.
+///
+/// # Safety
+///
+/// See `hi_register_handler`
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hi_register_handler_where_less_args_are_ok(
+    server: *mut OscServer,
+    path: *const c_char,
+    types: *const c_char,
+    callback: extern "C" fn(
+        *const c_char,
+        *const c_char,
+        *const *const c_void,
+        i32,
+        *mut OscAnswer,
+        *mut c_void,
+    ),
+    user_data_from_c: *mut c_void,
+) -> ApiResult {
+    unsafe { internal_register_handler(server, path, types, true, callback, user_data_from_c) }
 }
 
 /// Spawn a new thread and listen to the address specified in [`hi_server_new`].
