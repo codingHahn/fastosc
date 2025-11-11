@@ -2,7 +2,9 @@ use criterion::BenchmarkId;
 use criterion::Criterion;
 use criterion::Throughput;
 use criterion::{criterion_group, criterion_main};
+use libhi::OscAnswer;
 use libhi::OscServer;
+use rosc::address::OscAddress;
 use rosc::{OscMessage, OscPacket, OscType};
 use std::fs::File;
 use std::io::{BufReader, prelude::*};
@@ -30,9 +32,28 @@ fn bench_handler_dispatch(c: &mut Criterion) {
             server
                 .register_handler(
                     &line,
+                    "",
                     Box::new(
-                        |msg: &OscMessage, _from_addr: &SocketAddr, _user_data: Option<_>| {
-                            std::hint::black_box(msg);
+                        |_path: &OscAddress,
+                         args: &Vec<OscType>,
+                         _answer: &mut OscAnswer,
+                         _user_data: Option<_>| {
+                            std::hint::black_box(args);
+                        },
+                    ),
+                    None,
+                )
+                .unwrap();
+            server
+                .register_handler(
+                    &line,
+                    "",
+                    Box::new(
+                        |_path: &OscAddress,
+                         args: &Vec<OscType>,
+                         _answer: &mut OscAnswer,
+                         _user_data: Option<_>| {
+                            std::hint::black_box(args);
                         },
                     ),
                     None,
@@ -74,9 +95,13 @@ fn bench_handler_dispatch_wildcard(c: &mut Criterion) {
             server
                 .register_handler(
                     &line,
+                    "",
                     Box::new(
-                        |msg: &OscMessage, _from_addr: &SocketAddr, _user_data: Option<_>| {
-                            std::hint::black_box(msg);
+                        |_path: &OscAddress,
+                         args: &Vec<OscType>,
+                         _answer: &mut OscAnswer,
+                         _user_data: Option<_>| {
+                            std::hint::black_box(args);
                         },
                     ),
                     None,
