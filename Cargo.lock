@@ -581,7 +581,7 @@ checksum = "c3160422bbd54dd5ecfdca71e5fd59b7b8fe2b1697ab2baf64f6d05dcc66d298"
 [[package]]
 name = "rosc"
 version = "0.11.4"
-source = "git+https://github.com/codingHahn/rosc.git?rev=229ee4733ea85df0f6e5db9098bf471fbd194630#229ee4733ea85df0f6e5db9098bf471fbd194630"
+source = "git+https://github.com/codingHahn/rosc.git?rev=58bb0a7445adb441228f18eb302314c2172b0e20#58bb0a7445adb441228f18eb302314c2172b0e20"
 dependencies = [
  "byteorder",
  "nom",

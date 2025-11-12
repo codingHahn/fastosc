@@ -17,7 +17,7 @@ name = "libhi-demo"
 path = "src/main.rs"
 
 [dependencies]
-rosc = { git = "https://github.com/codingHahn/rosc.git", rev = "229ee4733ea85df0f6e5db9098bf471fbd194630" }
+rosc = { git = "https://github.com/codingHahn/rosc.git", rev = "58bb0a7445adb441228f18eb302314c2172b0e20" }
 
 [dev-dependencies]
 criterion = "0.3"
