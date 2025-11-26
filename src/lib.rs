@@ -20,6 +20,7 @@ pub enum FastOscError {
     OscError(OscError),
     MutexFail,
     RegisterHandlerError,
+    ArgumentCoerceError,
     ThreadPanic,
     NullHandle,
 }
@@ -109,7 +110,7 @@ impl OscServerInternal {
     ) -> Result<(), FastOscError> {
         // Coerce arguments, then check if numbner of successfully coerced arguments matches the
         // expected count
-        let coerced_arguments = coerce_arguments(args, &callback.types);
+        let coerced_arguments = coerce_arguments(args, &callback.types)?;
 
         // If less arguments are ok, the callback is responsible to read no more than argc entries
         // into argv
@@ -533,25 +534,59 @@ pub fn osctype_is_numerical(a: &OscType) -> bool {
     )
 }
 
-pub fn osctype_coerce(from: &OscType, to: &OscType) -> OscType {
+/// Converts [`OscTypes`] to and from another if possible. This function truncates, rounds and
+/// tires to fit the source type into the result type.
+fn osctype_coerce(from: &OscType, to: &OscType) -> Result<OscType, FastOscError> {
     match (from, to) {
-        (OscType::Int(a), OscType::Float(_)) => OscType::Float(*a as f32),
-        (OscType::Int(a), OscType::Long(_)) => OscType::Long(*a as i64),
-        (OscType::Int(a), OscType::Double(_)) => OscType::Double(*a as f64),
-        (OscType::Float(a), OscType::Int(_)) => OscType::Int(a.round() as i32),
-        (OscType::Float(a), OscType::Long(_)) => OscType::Long(a.round() as i64),
-        (OscType::Float(a), OscType::Double(_)) => OscType::Double(*a as f64),
-        (OscType::Long(a), OscType::Int(_)) => OscType::Int(*a as i32),
-        (OscType::Long(a), OscType::Float(_)) => OscType::Float(*a as f32),
-        (OscType::Long(a), OscType::Double(_)) => OscType::Double(*a as f64),
-        (OscType::Double(a), OscType::Int(_)) => OscType::Int(a.round() as i32),
-        (OscType::Double(a), OscType::Float(_)) => OscType::Float(*a as f32),
-        (OscType::Double(a), OscType::Long(_)) => OscType::Long(a.round() as i64),
-        (_, _) => OscType::Int(0),
+        (OscType::Int(a), OscType::Float(_)) => Ok(OscType::Float(*a as f32)),
+        (OscType::Int(a), OscType::Long(_)) => Ok(OscType::Long(*a as i64)),
+        (OscType::Int(a), OscType::Double(_)) => Ok(OscType::Double(*a as f64)),
+        (OscType::Float(a), OscType::Int(_)) => Ok(OscType::Int(a.round() as i32)),
+        (OscType::Float(a), OscType::Long(_)) => Ok(OscType::Long(a.round() as i64)),
+        (OscType::Float(a), OscType::Double(_)) => Ok(OscType::Double(*a as f64)),
+        (OscType::Long(a), OscType::Int(_)) => Ok(OscType::Int(*a as i32)),
+        (OscType::Long(a), OscType::Float(_)) => Ok(OscType::Float(*a as f32)),
+        (OscType::Long(a), OscType::Double(_)) => Ok(OscType::Double(*a as f64)),
+        (OscType::Double(a), OscType::Int(_)) => Ok(OscType::Int(a.round() as i32)),
+        (OscType::Double(a), OscType::Float(_)) => Ok(OscType::Float(*a as f32)),
+        (OscType::Double(a), OscType::Long(_)) => Ok(OscType::Long(a.round() as i64)),
+        (OscType::String(a), OscType::Int(_)) => coerce_string_to_numerical(a, &OscType::Int(0)),
+        (OscType::String(a), OscType::Float(_)) => {
+            coerce_string_to_numerical(a, &OscType::Float(0.0))
+        }
+        (OscType::String(a), OscType::Long(_)) => coerce_string_to_numerical(a, &OscType::Long(0)),
+        (_, _) => Err(FastOscError::ArgumentCoerceError),
     }
 }
 
-pub fn coerce_arguments(src_list: &[OscType], types: &[char]) -> Vec<OscType> {
+/// Try to parse a String into a numerical type with [`str::parse`]. Returns an
+/// [`FastOscError::ArgumentCoerceError`] if it fails
+fn coerce_string_to_numerical(from: &str, to: &OscType) -> Result<OscType, FastOscError> {
+    match to {
+        OscType::Int(_) => Ok(OscType::Int(
+            from.parse()
+                .map_err(|_| FastOscError::ArgumentCoerceError)?,
+        )),
+        OscType::Float(_) => Ok(OscType::Float(
+            from.parse()
+                .map_err(|_| FastOscError::ArgumentCoerceError)?,
+        )),
+        OscType::Long(_) => Ok(OscType::Long(
+            from.parse()
+                .map_err(|_| FastOscError::ArgumentCoerceError)?,
+        )),
+        OscType::Double(_) => Ok(OscType::Double(
+            from.parse()
+                .map_err(|_| FastOscError::ArgumentCoerceError)?,
+        )),
+        _ => Err(FastOscError::ArgumentCoerceError),
+    }
+}
+
+pub fn coerce_arguments(
+    src_list: &[OscType],
+    types: &[char],
+) -> Result<Vec<OscType>, FastOscError> {
     let mut coerced_arguments = vec![];
 
     // Make sure that we don't go out of bounds by taking the smaller of the two lengths
@@ -561,12 +596,12 @@ pub fn coerce_arguments(src_list: &[OscType], types: &[char]) -> Vec<OscType> {
         if osc_type_to_char(&src_list[i]) == types[i] {
             coerced_arguments.push(src_list[i].clone());
         } else if osctype_is_coercible(&src_list[i], &temp_destination_type) {
-            coerced_arguments.push(osctype_coerce(&src_list[i], &temp_destination_type));
+            coerced_arguments.push(osctype_coerce(&src_list[i], &temp_destination_type)?);
         } else {
             println!("Unsupported argument found: TODO , expected {temp_destination_type}");
         }
     }
-    coerced_arguments
+    Ok(coerced_arguments)
 }
 
 pub fn library_version() -> (&'static str, i32, i32, i32) {
