@@ -517,11 +517,21 @@ pub fn char_to_osc_type(osc_type: char) -> OscType {
     }
 }
 
+/// Returns true if OscTypes are coercible into each other.
+/// This is true if:
+/// - they have the same type
+/// - both types are numerical (Int, Long, Float, Double) or
+/// - one is type string and the other is numerical
 pub fn osctype_is_coercible(a: &OscType, b: &OscType) -> bool {
     if discriminant(a) == discriminant(b) {
         return true;
     }
     if osctype_is_numerical(a) && osctype_is_numerical(b) {
+        return true;
+    }
+    if (matches!(a, OscType::String(_)) && osctype_is_numerical(b))
+        || (matches!(b, OscType::String(_)) && osctype_is_numerical(a))
+    {
         return true;
     }
     false
