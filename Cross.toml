@@ -1,0 +1,5 @@
+[target.x86_64-unknown-linux-gnu]
+image = "debian:bullseye"
+pre-build = [
+    "apt-get update && apt-get install --assume-yes pkg-config build-essential libasound2-dev"
+]
