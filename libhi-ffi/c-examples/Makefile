@@ -7,7 +7,7 @@ all: $(EXAMPLES)
 
 $(EXAMPLES): %: %.c ../../target/debug/libhiffi.so
 
-../../target/debug/liblibhiffi.so:
+../../target/debug/libhiffi.so:
 	cd .. && cargo build
 
 clean:
