@@ -96,9 +96,7 @@ impl OscServerInternal {
     }
 
     fn copy_socket(&self) -> Result<UdpSocket, FastOscError> {
-        self.sock
-            .try_clone()
-            .map_err(|e| FastOscError::SocketError(e))
+        self.sock.try_clone().map_err(FastOscError::SocketError)
     }
 
     fn handle_message(
@@ -332,7 +330,7 @@ impl OscServer {
         // Make sock.recv block only for 25 ms at a time. Otherwise we would block shutting down
         // the task until we recieve another packet.
         sock.set_read_timeout(Some(Duration::from_millis(25)))
-            .map_err(|e| FastOscError::SocketError(e))?;
+            .map_err(FastOscError::SocketError)?;
 
         // Event loop. Reading the UDP socket blocks for 25 ms, then checks if the thread
         // should shutdown
@@ -341,20 +339,20 @@ impl OscServer {
             loop {
                 match sock.recv_from(&mut udp_buf) {
                     Ok((size, addr)) => {
-                        if let Err(err) = serv.recv_from(&udp_buf, size, addr) {
-                            if let Ok(lock) = serv.internal.lock() {
-                                if lock.stop {
-                                    break;
-                                }
-                                if let Some(handler) = &lock.error_handler {
-                                    let error_str = format!("FastOscError: {err:#?}");
-                                    (handler)(&error_str);
-                                }
+                        if let Err(err) = serv.recv_from(&udp_buf, size, addr)
+                            && let Ok(lock) = serv.internal.lock()
+                        {
+                            if lock.stop {
+                                break;
                             }
-                            // Explicitly do nothing if no error handler is registered.
-                            // TODO: Maybe register a dummy handler, which dumps to
-                            // stdout/stderror?
+                            if let Some(handler) = &lock.error_handler {
+                                let error_str = format!("FastOscError: {err:#?}");
+                                (handler)(&error_str);
+                            }
                         }
+                        // Explicitly do nothing if no error handler is registered.
+                        // TODO: Maybe register a dummy handler, which dumps to
+                        // stdout/stderror?
                     }
                     Err(e) => {
                         // WouldBlock is returned when the timeout is reached
@@ -363,10 +361,10 @@ impl OscServer {
                         }
                         // Check if `stop_server_thread` was called (this sets lock.stop to true)
                         // and break out of the loop
-                        if let Ok(lock) = serv.internal.lock() {
-                            if lock.stop {
-                                break;
-                            }
+                        if let Ok(lock) = serv.internal.lock()
+                            && lock.stop
+                        {
+                            break;
                         }
                     }
                 }
